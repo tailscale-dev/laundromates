@@ -1,0 +1,20 @@
+services:
+  laundromates:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laundromates
+    # ports:
+    #   - "12012:12012" # Uncomment and set LAUNDROMATES_ALLOW_NON_TS if you plan to also make the app accessible locally without Tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_HOSTNAME=${TS_HOSTNAME:-laundromates}
+      - LAUNDROMATES_NTFY_SERVER=${LAUNDROMATES_NTFY_SERVER:-https://ntfy.${TS_MAGICDNS_DOMAIN}}
+      - LAUNDROMATES_ALLOW_NON_TS=${LAUNDROMATES_ALLOW_NON_TS:-false}
+      # - LAUNDROMATES_ALLOWED_DOMAINS= # Uncomment and set allowed domains if you want to restrict external (invited or node sharing) users
+      # - LAUNDROMATES_DEBUG=true # Uncomment to enable debug mode
+    volumes:
+      - laundromates-state:/app/state
+
+volumes:
+  laundromates-state:

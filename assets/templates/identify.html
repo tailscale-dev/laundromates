@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Laundromates - User Identification</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container container-small">
+        <h1>🧺 Laundromates</h1>
+        
+        <div class="info">
+            <p>Please enter your name as you would like it displayed in the application.</p>
+        </div>
+
+        <form hx-post="/identify" 
+              hx-target="body" 
+              hx-swap="innerHTML">
+            <div class="form-group">
+                <label for="name">Your Name</label>
+                <input type="text" 
+                       id="name" 
+                       name="name" 
+                       required 
+                       placeholder="Enter your name"
+                       autocomplete="name"
+                       autofocus>
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+                <span id="loading" class="htmx-indicator">Identifying...</span>
+                <span id="normal-text">Continue</span>
+            </button>
+        </form>
+    </div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Laundromates - Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.13.3/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container">
+        <h1>🧺 Laundromates</h1>
+
+        <!-- Desktop Status table -->
+        <table class="status-table desktop-only" id="status-table">
+            <thead>
+                <tr>
+                    <th>Machine</th>
+                    <th>Status</th>
+                    <th>🕒 Remaining</th>
+                    <th>Current</th>
+                    <th>Waiting</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Washer Row -->
+                <tr id="washer-row">
+                    {{template "machine-row-washer" .}}
+                </tr>
+                <!-- Dryer Row -->
+                <tr id="dryer-row">
+                    {{template "machine-row-dryer" .}}
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Mobile Machine Cards -->
+        <div class="mobile-only">
+            <!-- Washer Card -->
+            <div id="washer-card">
+                {{template "machine-card-washer" .}}
+            </div>
+
+            <!-- Dryer Card -->
+            <div id="dryer-card">
+                {{template "machine-card-dryer" .}}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer info -->
+    <div class="footer-info">
+        <p class="info mobile-notification-short">
+            💡 <a href="ntfy://{{.NtfyURL}}">Subscribe</a> for notifications!
+            If you don't have ntfy, you can install it from the <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Google Play Store</a>.
+        </p>
+        <p class="info desktop-notification-full">
+            💡 If you would like to receive notifications when your laundry is done or someone else needs to use the machine, please subscribe to <a href="https://{{.NtfyURL}}">the ntfy topic</a>.
+        </p>
+    </div>
+</body>
+<script>
+// Alpine.js countdown component
+function countdown(initialSeconds) {
+    return {
+        seconds: initialSeconds,
+        interval: null,
+        
+        startCountdown() {
+            this.interval = setInterval(() => {
+                if (this.seconds > 0) {
+                    this.seconds--;
+                } else {
+                    // Timer reached zero - could trigger HTMX refresh here
+                    clearInterval(this.interval);
+                    // Optional: trigger HTMX to refresh the machine state
+                    // htmx.trigger(this.$el.closest('.machine-card'), 'refresh-machine');
+                }
+            }, 1000);
+        },
+        
+        // Clean up interval when component is destroyed
+        destroy() {
+            if (this.interval) {
+                clearInterval(this.interval);
+            }
+        }
+    }
+}
+
+// Parse time strings like "2m 30s", "45s", "1h 5m 30s" into total seconds
+function parseTimeString(timeStr) {
+    if (!timeStr || timeStr === '-' || timeStr === '0s') return 0;
+    
+    let totalSeconds = 0;
+    const timeRegex = /(\d+)([hms])/g;
+    let match;
+    
+    while ((match = timeRegex.exec(timeStr)) !== null) {
+        const value = parseInt(match[1]);
+        const unit = match[2];
+        
+        switch (unit) {
+            case 'h':
+                totalSeconds += value * 3600;
+                break;
+            case 'm':
+                totalSeconds += value * 60;
+                break;
+            case 's':
+                totalSeconds += value;
+                break;
+        }
+    }
+    
+    return totalSeconds;
+}
+
+// Format seconds back to readable time string
+function formatTime(totalSeconds) {
+    if (totalSeconds <= 0) return '0s';
+    
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    let result = '';
+    if (hours > 0) result += hours + 'h ';
+    if (minutes > 0) result += minutes + 'm ';
+    if (seconds > 0 || result === '') result += seconds + 's';
+    
+    return result.trim();
+}
+
+// Make functions globally available for Alpine
+window.countdown = countdown;
+window.parseTimeString = parseTimeString;
+window.formatTime = formatTime;
+</script>
+</html>

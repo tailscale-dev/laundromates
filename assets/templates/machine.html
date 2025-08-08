@@ -1,0 +1,417 @@
+{{define "machine-row-washer"}}
+    <td>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <strong>🧼 Washer</strong>
+        </div>
+    </td>
+    <td>
+        {{if and .Washer.User (not .Washer.Waiter)}}
+            <span class="status-badge status-in-use">In Use</span>
+        {{else if .Washer.User}}
+            <span class="status-badge status-waiting">Waiting</span>
+        {{else}}
+            <span class="status-badge status-available">Available</span>
+        {{end}}
+    </td>
+    <td>
+        {{if .Washer.User}}
+            <span x-data="countdown(parseTimeString('{{.Washer.TimeRemainingFormatted}}'))" 
+              x-init="startCountdown()"
+              x-text="formatTime(seconds)">
+            {{.Washer.TimeRemainingFormatted}}
+            </span>
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        {{if .Washer.User}}
+            {{.Washer.User.Name}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        {{if .Washer.Waiter}}
+            {{.Washer.Waiter.Name}} - {{.Washer.WaitingTimeFormatted}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+            {{if not .Washer.User}}
+                <form hx-post="/machine" 
+                      hx-target="#washer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="number" 
+                           name="duration" 
+                           value="60" 
+                           min="1" 
+                           max="300" 
+                           class="duration-input"
+                           style="width: 60px; margin-right: 5px;">
+                    <button type="submit" class="btn btn-start" style="padding: 6px 12px; font-size: 14px;">
+                        Start
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Washer.User (ne .Washer.User.NameLower .CurrentUser.NameLower) (not .Washer.Waiter)}}
+                <form hx-post="/machine" 
+                      hx-target="#washer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="request">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-request" style="padding: 6px 12px; font-size: 14px;">
+                        Request
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Washer.User .Washer.User (eq .Washer.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/machine" 
+                      hx-target="#washer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="clear">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-clear" style="padding: 6px 12px; font-size: 14px;">
+                        Clear
+                    </button>
+                </form>
+            {{end}}
+        </div>
+    </td>
+{{end}}
+
+{{define "machine-row-dryer"}}
+    <td>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <strong>♨️ Dryer</strong>
+        </div>
+    </td>
+    <td>
+        {{if and .Dryer.User (not .Dryer.Waiter)}}
+            <span class="status-badge status-in-use">In Use</span>
+        {{else if .Dryer.User}}
+            <span class="status-badge status-waiting">Waiting</span>
+        {{else}}
+            <span class="status-badge status-available">Available</span>
+        {{end}}
+    </td>
+    <td>
+        {{if .Dryer.User}}
+            <span x-data="countdown(parseTimeString('{{.Dryer.TimeRemainingFormatted}}'))" 
+              x-init="startCountdown()"
+              x-text="formatTime(seconds)">
+            {{.Dryer.TimeRemainingFormatted}}
+            </span>
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        {{if .Dryer.User}}
+            {{.Dryer.User.Name}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        {{if .Dryer.Waiter}}
+            {{.Dryer.Waiter.Name}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+            {{if not .Dryer.User}}
+                <form hx-post="/machine" 
+                      hx-target="#dryer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="number" 
+                           name="duration" 
+                           value="60" 
+                           min="1" 
+                           max="300" 
+                           class="duration-input"
+                           style="width: 60px; margin-right: 5px;">
+                    <button type="submit" class="btn btn-start" style="padding: 6px 12px; font-size: 14px;">
+                        Start
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Dryer.User (ne .Dryer.User.NameLower .CurrentUser.NameLower) (not .Dryer.Waiter)}}
+                <form hx-post="/machine" 
+                      hx-target="#dryer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="request">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-request" style="padding: 6px 12px; font-size: 14px;">
+                        Request
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Dryer.User .Dryer.User (eq .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/machine" 
+                      hx-target="#dryer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="clear">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-clear" style="padding: 6px 12px; font-size: 14px;">
+                        Clear
+                    </button>
+                </form>
+            {{end}}
+        </div>
+    </td>
+{{end}}
+
+{{define "machine-card-washer"}}
+    <div class="machine-card">
+        <div class="machine-header">
+            <div class="machine-title">
+                <strong>🧼 Washer</strong>
+            </div>
+            {{if and .Washer.User (not .Washer.Waiter) }}
+                <div class="status-badge status-in-use">
+                    In Use 
+                    {{if ne .Washer.User.NameLower .CurrentUser.NameLower}}
+                    <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Washer.User.Name}}</strong>
+                    {{end}}
+                </div>
+            {{else if .Washer.Waiter}}
+                <div class="status-badge status-waiting">
+                    {{if eq .Washer.Waiter.NameLower .CurrentUser.NameLower}}
+                        Waiting on <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Washer.User.Name}}</strong>
+                    {{else if .Washer.Waiter}}
+                        Waiting <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Washer.Waiter.Name}}</strong>
+                    {{end}}
+                </div>
+            {{end}}
+        </div>
+        
+        {{if not .Washer.User}}
+            <!-- Available State -->
+            <div class="machine-content">
+                <form hx-post="/machine" 
+                      hx-target="#washer-card" 
+                      hx-swap="innerHTML"
+                      class="mobile-timer-form">
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="mobile">
+                    <div class="mobile-timer-controls">
+                        <input type="number" 
+                               name="duration" 
+                               value="60" 
+                               min="1" 
+                               max="300" 
+                               class="duration-input-mobile"
+                               oninput="var el = this.parentElement.parentElement.parentElement.querySelector('.machine-duration'); if (el) el.textContent = this.value + 'm'">
+                        <button type="submit" class="btn btn-start btn-mobile-start">
+                            Start
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {{else if not .Washer.Waiter}}
+            <!-- In Use State -->
+            <div class="machine-content">
+                <div class="machine-info">
+                    <div class="time-remaining" 
+                    x-data="countdown(parseTimeString('{{.Washer.TimeRemainingFormatted}}'))" 
+                    x-init="startCountdown()"
+                    x-text="formatTime(seconds) + ' remaining'">
+                    {{.Washer.TimeRemainingFormatted}} remaining</div>
+                    <div class="inline">
+                    {{if and .Washer.User (ne .Washer.User.NameLower .CurrentUser.NameLower)}}
+                        <form hx-post="/machine" 
+                              hx-target="#washer-card" 
+                              hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="request">
+                            <input type="hidden" name="machine" value="washer">
+                            <input type="hidden" name="view" value="mobile">
+                            <button type="submit" class="btn btn-request btn-full">
+                                Request
+                            </button>
+                        </form>
+                {{else if and .Washer.User (eq .Washer.User.NameLower .CurrentUser.NameLower)}}
+                
+                    <form hx-post="/machine" 
+                          hx-target="#washer-card" 
+                          hx-swap="innerHTML">
+                        <input type="hidden" name="action" value="clear">
+                        <input type="hidden" name="machine" value="washer">
+                        <input type="hidden" name="view" value="mobile">
+                        <button type="submit" class="btn btn-clear">
+                            Clear
+                        </button>
+                    </form>
+                {{end}}
+                </div>
+            </div>
+        {{else}}
+            <!-- Waiting State -->
+            <div class="machine-content">
+                <div class="machine-info">
+                    {{if ne .Washer.TimeRemainingFormatted "0s"}}
+                        <div class="time-remaining" 
+                            x-data="countdown(parseTimeString('{{.Washer.TimeRemainingFormatted}}'))" 
+                            x-init="startCountdown()"
+                            x-text="formatTime(seconds) + ' remaining'">
+                            {{.Washer.TimeRemainingFormatted}} remaining</div>
+                    {{else}}
+                        <div class="waiting-info">Waiting for {{.Washer.WaitingTimeFormatted}}</div>
+                    {{end}}
+                    <div class="inline">
+                        {{if and .Washer.User (eq .Washer.User.NameLower .CurrentUser.NameLower)}}
+                        <form hx-post="/machine" 
+                                hx-target="#washer-card" 
+                                hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="clear">
+                            <input type="hidden" name="machine" value="washer">
+                            <input type="hidden" name="view" value="mobile">
+                            <button type="submit" class="btn btn-clear">
+                                Clear
+                            </button>
+                        </form>
+                        {{end}}
+                    </div>
+                </div>
+            </div>
+        {{end}}
+    </div>
+{{end}}
+
+{{define "machine-card-dryer"}}
+    <div class="machine-card">
+        <div class="machine-header">
+            <div class="machine-title">
+                <strong>♨️ Dryer</strong>
+            </div>
+            {{if and .Dryer.User (not .Dryer.Waiter) }}
+                <div class="status-badge status-in-use">
+                    In Use 
+                    {{if ne .Dryer.User.NameLower .CurrentUser.NameLower}}
+                        <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Dryer.User.Name}}</strong>
+                    {{end}}
+                </div>
+            {{else if .Dryer.Waiter}}
+                <div class="status-badge status-waiting">
+                    {{if eq .Dryer.Waiter.NameLower .CurrentUser.NameLower}}
+                        Waiting on<strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Dryer.User.Name}}</strong>
+                    {{else if .Dryer.Waiter}}
+                        Waiting <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Dryer.Waiter.Name}}</strong>
+                    {{end}}
+                </div>
+            {{end}}
+        </div>
+        
+        {{if not .Dryer.User}}
+            <!-- Available State -->
+            <div class="machine-content">
+                <form hx-post="/machine" 
+                      hx-target="#dryer-card" 
+                      hx-swap="innerHTML"
+                      class="mobile-timer-form">
+                    <input type="hidden" name="action" value="start">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="mobile">
+                    <div class="mobile-timer-controls">
+                        <input type="number" 
+                               name="duration" 
+                               value="60" 
+                               min="1" 
+                               max="300" 
+                               class="duration-input-mobile"
+                               oninput="var el = this.parentElement.parentElement.parentElement.querySelector('.machine-duration'); if (el) el.textContent = this.value + 'm'">
+                        <button type="submit" class="btn btn-start btn-mobile-start">
+                            Start
+                        </button>
+                    </div>
+                </form>
+            </div>
+        {{else if not .Dryer.Waiter}}
+            <!-- In Use State -->
+            <div class="machine-content">
+                <div class="machine-info">
+                    <div class="time-remaining" 
+                        x-data="countdown(parseTimeString('{{.Dryer.TimeRemainingFormatted}}'))" 
+                        x-init="startCountdown()"
+                        x-text="formatTime(seconds) + ' remaining'">
+                        {{.Dryer.TimeRemainingFormatted}} remaining</div>
+                    <div class="inline">
+                    {{if and .Dryer.User (ne .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                        <form hx-post="/machine" 
+                              hx-target="#dryer-card" 
+                              hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="request">
+                            <input type="hidden" name="machine" value="dryer">
+                            <input type="hidden" name="view" value="mobile">
+                            <button type="submit" class="btn btn-request btn-full">
+                            Request
+                            </button>
+                        </form>
+                    {{else if and .Dryer.User (eq .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                    <form hx-post="/machine" 
+                          hx-target="#dryer-card" 
+                          hx-swap="innerHTML">
+                        <input type="hidden" name="action" value="clear">
+                        <input type="hidden" name="machine" value="dryer">
+                        <input type="hidden" name="view" value="mobile">
+                        <button type="submit" class="btn btn-clear">
+                            Clear
+                        </button>
+                    </form>
+                {{end}}
+                </div>
+            </div>
+        {{else}}
+            <!-- Waiting State -->
+            <div class="machine-content">
+                <div class="machine-info">
+                    <div class="inline">
+                        {{if ne .Dryer.TimeRemainingFormatted "0s"}}
+                            <div class="time-remaining" 
+                                x-data="countdown(parseTimeString('{{.Dryer.TimeRemainingFormatted}}'))" 
+                                x-init="startCountdown()"
+                                x-text="formatTime(seconds) + ' remaining'">
+                                {{.Dryer.TimeRemainingFormatted}} remaining</div>
+                        {{else}}
+                            <div class="waiting-info">Waiting for {{.Dryer.WaitingTimeFormatted}}</div>
+                        {{end}}
+                        {{if and .Dryer.User (eq .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                            <form hx-post="/machine" 
+                                hx-target="#dryer-card" 
+                                hx-swap="innerHTML">
+                                <input type="hidden" name="action" value="clear">
+                                <input type="hidden" name="machine" value="dryer">
+                                <input type="hidden" name="view" value="mobile">
+                                <button type="submit" class="btn btn-clear">
+                                    Clear
+                                </button>
+                            </form>
+                        {{end}}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {{end}}
+    </div>
+{{end}}

@@ -1,0 +1,72 @@
+configs:
+  serve.json:
+    content: |
+      {
+        "Web": {
+          "{$TS_HOSTNAME}.${TS_MAGICDNS_DOMAIN}:443": {
+            "Handlers": {
+              "/": {
+                "Proxy": "http://127.0.0.1:80"
+              }
+            }
+          }
+        }
+      }
+
+services:
+  laundromates:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: laundromates
+    # ports:
+    #   - "12012:12012" # Uncomment and set LAUNDROMATES_ALLOW_NON_TS if you plan to also make the app accessible locally without Tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_HOSTNAME=${TS_HOSTNAME:-laundromates}
+      - LAUNDROMATES_NTFY_SERVER=https://ntfy.${TS_MAGICDNS_DOMAIN}
+      - LAUNDROMATES_ALLOW_NON_TS=${LAUNDROMATES_ALLOW_NON_TS:-false} # Additional DNS/network configuration may be required for non-Tailscale access
+      # - LAUNDROMATES_ALLOWED_DOMAINS= # Uncomment and set allowed domains if you want to restrict external (invited or node sharing) users
+    volumes:
+      - laundromates-state:/app/state
+
+  ntfy:
+    image: binwiederhier/ntfy
+    container_name: ntfy
+    expose:
+      - "80"
+    command:
+      - serve
+    environment:
+      - TZ=America/Phoenix
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+      - ntfy-config:/etc/ntfy
+    restart: unless-stopped
+    profiles:
+      - ntfy
+
+  ts-ntfy:
+    image: tailscale/tailscale
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_SERVE_CONFIG=/etc/serve.json
+      - TS_HOSTNAME=ntfy
+      - TS_STATE="mem:"
+      - TS_STATE_DIR=/var/lib/tailscale
+    container_name: ts-ntfy
+    volumes:
+      - ts-ntfy-state:/var/lib/tailscale # For TLS certs, ephemeral means no state is stored
+    configs:
+      - source: serve.json
+        target: /etc/serve.json
+    restart: unless-stopped
+    network_mode: service:ntfy
+    profiles:
+      - ntfy
+
+volumes:
+  laundromates-state:
+  ntfy-cache:
+  ntfy-config:
+  ts-ntfy-state:
