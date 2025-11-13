@@ -70,8 +70,7 @@
                 <button type="button" 
                         class="btn btn-schedule" 
                         style="padding: 6px 12px; font-size: 14px;"
-                        x-data
-                        @click="$dispatch('open-schedule-modal', {machine: 'washer', view: 'desktop'})">
+                        onclick="window.dispatchEvent(new CustomEvent('open-schedule-modal', { detail: {machine: 'washer', view: 'desktop'} }))">
                     🕐
                 </button>
                 {{else if and .Washer.Scheduled (eq .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
@@ -190,8 +189,7 @@
                 <button type="button" 
                         class="btn btn-schedule" 
                         style="padding: 6px 12px; font-size: 14px;"
-                        x-data
-                        @click="$dispatch('open-schedule-modal', {machine: 'dryer', view: 'desktop'})">
+                        onclick="window.dispatchEvent(new CustomEvent('open-schedule-modal', { detail: {machine: 'dryer', view: 'desktop'} }))">
                     🕐
                 </button>
                 {{else if and .Dryer.Scheduled (eq .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
@@ -293,8 +291,7 @@
                     {{if not .Washer.Scheduled}}
                     <button type="button" 
                             class="btn btn-schedule"
-                            x-data
-                            @click="$dispatch('open-schedule-modal', {machine: 'washer', view: 'mobile'})">
+                            onclick="window.dispatchEvent(new CustomEvent('open-schedule-modal', { detail: {machine: 'washer', view: 'mobile'} }))">
                         🕐
                     </button>
                     {{else if and .Washer.Scheduled (eq .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
@@ -436,8 +433,7 @@
                     {{if not .Dryer.Scheduled}}
                     <button type="button" 
                             class="btn btn-schedule"
-                            x-data
-                            @click="$dispatch('open-schedule-modal', {machine: 'dryer', view: 'mobile'})">
+                            onclick="window.dispatchEvent(new CustomEvent('open-schedule-modal', { detail: {machine: 'dryer', view: 'mobile'} }))">
                         🕐
                     </button>
                     {{else if and .Dryer.Scheduled (eq .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}

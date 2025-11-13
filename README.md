@@ -1,6 +1,6 @@
 # Laundromates
 
-Laundromates is a Go-based application designed to manage and monitor laundry machines. It provides a web interface for users to identify and interact with laundry machines. The application is containerized using Docker and can be deployed with or without an ntfy server, depending on your setup.
+Laundromates is designed to manage and monitor the status of your laundry room to make it easier to get laundry done between room/house-mates. It provides a web interface for users to identify and interact with laundry machines. The application is containerized using Docker and can be deployed with or without an ntfy server, depending on your setup.
 
 ## Features
 - Web interface for managing laundry machines.

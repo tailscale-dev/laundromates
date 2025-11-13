@@ -4,9 +4,11 @@
     <title>Laundromates - Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.13.3/cdn.min.js"></script>
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -57,16 +59,16 @@
          x-show="isOpen" 
          x-cloak
          class="modal-overlay"
-         @click.self="close()">
-        <div class="modal-content">
+         @click.self="close()"
+         style="display: none;">
+        <div class="modal-content" @click.stop>
             <h2>Schedule Laundry</h2>
-            <form :hx-post="'/schedule'"
-                  :hx-target="targetId"
+            <form hx-post="/schedule"
                   hx-swap="innerHTML"
-                  @htmx:after-request="close()">
+                  @submit.prevent="submitSchedule($event)">
                 <input type="hidden" name="action" value="schedule">
-                <input type="hidden" name="machine" :value="machine">
-                <input type="hidden" name="view" :value="view">
+                <input type="hidden" name="machine" x-model="machine">
+                <input type="hidden" name="view" x-model="view">
                 
                 <div class="form-group">
                     <label>Day</label>
@@ -105,125 +107,137 @@
             💡 If you would like to receive notifications when your laundry is done or someone else needs to use the machine, please subscribe to <a href="https://{{.NtfyURL}}">the ntfy topic</a>.
         </p>
     </div>
-</body>
-<script>
-// Alpine.js countdown component
-function countdown(initialSeconds) {
-    return {
-        seconds: initialSeconds,
-        interval: null,
-        
-        startCountdown() {
-            this.interval = setInterval(() => {
-                if (this.seconds > 0) {
-                    this.seconds--;
-                } else {
-                    // Timer reached zero - could trigger HTMX refresh here
+    <script>
+    function countdown(initialSeconds) {
+        return {
+            seconds: initialSeconds,
+            interval: null,
+            
+            startCountdown() {
+                this.interval = setInterval(() => {
+                    if (this.seconds > 0) {
+                        this.seconds--;
+                    } else {
+                        clearInterval(this.interval);
+                    }
+                }, 1000);
+            },
+            
+            destroy() {
+                if (this.interval) {
                     clearInterval(this.interval);
-                    // Optional: trigger HTMX to refresh the machine state
-                    // htmx.trigger(this.$el.closest('.machine-card'), 'refresh-machine');
                 }
-            }, 1000);
-        },
-        
-        // Clean up interval when component is destroyed
-        destroy() {
-            if (this.interval) {
-                clearInterval(this.interval);
             }
         }
     }
-}
 
-// Parse time strings like "2m 30s", "45s", "1h 5m 30s" into total seconds
-function parseTimeString(timeStr) {
-    if (!timeStr || timeStr === '-' || timeStr === '0s') return 0;
-    
-    let totalSeconds = 0;
-    const timeRegex = /(\d+)([hms])/g;
-    let match;
-    
-    while ((match = timeRegex.exec(timeStr)) !== null) {
-        const value = parseInt(match[1]);
-        const unit = match[2];
+    function parseTimeString(timeStr) {
+        if (!timeStr || timeStr === '-' || timeStr === '0s') return 0;
         
-        switch (unit) {
-            case 'h':
-                totalSeconds += value * 3600;
-                break;
-            case 'm':
-                totalSeconds += value * 60;
-                break;
-            case 's':
-                totalSeconds += value;
-                break;
-        }
-    }
-    
-    return totalSeconds;
-}
-
-// Format seconds back to readable time string
-function formatTime(totalSeconds) {
-    if (totalSeconds <= 0) return '0s';
-    
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    
-    let result = '';
-    if (hours > 0) result += hours + 'h ';
-    if (minutes > 0) result += minutes + 'm ';
-    if (seconds > 0 || result === '') result += seconds + 's';
-    
-    return result.trim();
-}
-
-// Schedule modal component
-function scheduleModal() {
-    return {
-        isOpen: false,
-        machine: '',
-        view: '',
-        targetId: '',
-        selectedDay: 0,
-        selectedTime: 'morning',
-        days: [],
+        let totalSeconds = 0;
+        const timeRegex = /(\d+)([hms])/g;
+        let match;
         
-        open(detail) {
-            this.machine = detail.machine;
-            this.view = detail.view;
-            this.targetId = detail.view === 'desktop' ? `#${detail.machine}-row` : `#${detail.machine}-card`;
-            this.generateDays();
-            this.isOpen = true;
-        },
-        
-        close() {
-            this.isOpen = false;
-            this.selectedDay = 0;
-            this.selectedTime = 'morning';
-        },
-        
-        generateDays() {
-            const days = ['Today', 'Tomorrow'];
-            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const today = new Date();
+        while ((match = timeRegex.exec(timeStr)) !== null) {
+            const value = parseInt(match[1]);
+            const unit = match[2];
             
-            for (let i = 2; i < 7; i++) {
-                const futureDate = new Date(today);
-                futureDate.setDate(today.getDate() + i);
-                days.push(dayNames[futureDate.getDay()]);
+            switch (unit) {
+                case 'h':
+                    totalSeconds += value * 3600;
+                    break;
+                case 'm':
+                    totalSeconds += value * 60;
+                    break;
+                case 's':
+                    totalSeconds += value;
+                    break;
             }
+        }
+        
+        return totalSeconds;
+    }
+
+    function formatTime(totalSeconds) {
+        if (totalSeconds <= 0) return '0s';
+        
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        
+        let result = '';
+        if (hours > 0) result += hours + 'h ';
+        if (minutes > 0) result += minutes + 'm ';
+        if (seconds > 0 || result === '') result += seconds + 's';
+        
+        return result.trim();
+    }
+
+    function scheduleModal() {
+        return {
+            isOpen: false,
+            machine: '',
+            view: '',
+            targetId: '',
+            selectedDay: 0,
+            selectedTime: 'morning',
+            days: [],
             
-            this.days = days;
+            init() {
+                this.generateDays();
+            },
+            
+            open(detail) {
+                this.machine = detail.machine;
+                this.view = detail.view;
+                this.targetId = detail.view === 'desktop' ? `#${detail.machine}-row` : `#${detail.machine}-card`;
+                this.generateDays();
+                this.isOpen = true;
+                this.selectedDay = 0;
+                this.selectedTime = 'morning';
+            },
+            
+            close() {
+                this.isOpen = false;
+            },
+            
+            submitSchedule(event) {
+                const form = event.target;
+                const formData = new FormData(form);
+                
+                htmx.ajax('POST', '/schedule', {
+                    target: this.targetId,
+                    swap: 'innerHTML',
+                    values: Object.fromEntries(formData)
+                }).then(() => {
+                    this.close();
+                });
+            },
+            
+            generateDays() {
+                const days = ['Today', 'Tomorrow'];
+                const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const today = new Date();
+                
+                for (let i = 2; i < 7; i++) {
+                    const futureDate = new Date(today);
+                    futureDate.setDate(today.getDate() + i);
+                    days.push(dayNames[futureDate.getDay()]);
+                }
+                
+                this.days = days;
+            }
         }
     }
-}
 
-// Make functions globally available for Alpine
-window.countdown = countdown;
-window.parseTimeString = parseTimeString;
-window.formatTime = formatTime;
-window.scheduleModal = scheduleModal;
-</script>
+    // Make functions globally available
+    window.countdown = countdown;
+    window.parseTimeString = parseTimeString;
+    window.formatTime = formatTime;
+    window.scheduleModal = scheduleModal;
+    </script>
+    
+    <!-- Load Alpine AFTER functions are defined -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.13.3/cdn.min.js"></script>
+</body>
 </html>
