@@ -8,6 +8,20 @@ Laundromates is a Go-based application designed to manage and monitor laundry ma
 - Integrates with a [ntfy](https://ntfy.sh/) server to notify you when your laundry is done, or when someone else would like to use the machine.
 - Optional (BYO) NFC tags can be used to interact with the endpoints by tapping your phone to your washer/dryer.
 
+## Screenshots
+
+### Desktop
+![Machine Status Table](./screenshot_2.png)
+
+![Scheduled Load](./screenshot_4.png)
+
+### Mobile
+![Mobile Status Table](./screenshot_1.png)
+
+![Mobile Active](./screenshot_3.png)
+
+![Mobile Scheduled](./screenshot_5.png)
+
 ## Prerequisites
 - [Docker](https://docs.docker.com/engine/install/) and Docker Compose installed.
 - Tailscale account and [authentication key](https://login.tailscale.com/admin/settings/keys).
