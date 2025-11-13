@@ -21,6 +21,7 @@
                     <th>🕒 Remaining</th>
                     <th>Current</th>
                     <th>Waiting</th>
+                    <th>Scheduled</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -47,6 +48,50 @@
             <div id="dryer-card">
                 {{template "machine-card-dryer" .}}
             </div>
+        </div>
+    </div>
+    
+    <!-- Schedule Modal -->
+    <div x-data="scheduleModal()" 
+         @open-schedule-modal.window="open($event.detail)"
+         x-show="isOpen" 
+         x-cloak
+         class="modal-overlay"
+         @click.self="close()">
+        <div class="modal-content">
+            <h2>Schedule Laundry</h2>
+            <form :hx-post="'/schedule'"
+                  :hx-target="targetId"
+                  hx-swap="innerHTML"
+                  @htmx:after-request="close()">
+                <input type="hidden" name="action" value="schedule">
+                <input type="hidden" name="machine" :value="machine">
+                <input type="hidden" name="view" :value="view">
+                
+                <div class="form-group">
+                    <label>Day</label>
+                    <select name="day" x-model="selectedDay" required>
+                        <template x-for="(day, index) in days" :key="index">
+                            <option :value="index" x-text="day"></option>
+                        </template>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Time of Day</label>
+                    <select name="time" x-model="selectedTime" required>
+                        <option value="morning">Morning (8:00 AM)</option>
+                        <option value="afternoon">Afternoon (1:00 PM)</option>
+                        <option value="evening">Evening (6:00 PM)</option>
+                        <option value="night">Night (9:00 PM)</option>
+                    </select>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" @click="close()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Schedule</button>
+                </div>
+            </form>
         </div>
     </div>
     
@@ -134,9 +179,51 @@ function formatTime(totalSeconds) {
     return result.trim();
 }
 
+// Schedule modal component
+function scheduleModal() {
+    return {
+        isOpen: false,
+        machine: '',
+        view: '',
+        targetId: '',
+        selectedDay: 0,
+        selectedTime: 'morning',
+        days: [],
+        
+        open(detail) {
+            this.machine = detail.machine;
+            this.view = detail.view;
+            this.targetId = detail.view === 'desktop' ? `#${detail.machine}-row` : `#${detail.machine}-card`;
+            this.generateDays();
+            this.isOpen = true;
+        },
+        
+        close() {
+            this.isOpen = false;
+            this.selectedDay = 0;
+            this.selectedTime = 'morning';
+        },
+        
+        generateDays() {
+            const days = ['Today', 'Tomorrow'];
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const today = new Date();
+            
+            for (let i = 2; i < 7; i++) {
+                const futureDate = new Date(today);
+                futureDate.setDate(today.getDate() + i);
+                days.push(dayNames[futureDate.getDay()]);
+            }
+            
+            this.days = days;
+        }
+    }
+}
+
 // Make functions globally available for Alpine
 window.countdown = countdown;
 window.parseTimeString = parseTimeString;
 window.formatTime = formatTime;
+window.scheduleModal = scheduleModal;
 </script>
 </html>

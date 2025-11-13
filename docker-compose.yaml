@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: quay.io/dogmaticlimbo/laundromates:latest
     container_name: laundromates
     # ports:
     #   - "12012:12012" # Uncomment and set LAUNDROMATES_ALLOW_NON_TS if you plan to also make the app accessible locally without Tailscale

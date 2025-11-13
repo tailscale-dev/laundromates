@@ -72,9 +72,16 @@ type machine struct {
 	Waiter          *user                `json:"waiter,omitempty"`
 	WaitingFor      *time.Timer          `json:"-"`
 	WaitStartTime   time.Time            `json:"wait_start_time,omitempty"`
+	Scheduled       *scheduledLoad       `json:"scheduled,omitempty"`
 	cancelFunc      context.CancelFunc   `json:"-"`
 	reminderCancels []context.CancelFunc `json:"-"`
+	scheduledCancel context.CancelFunc   `json:"-"` // Cancel function for scheduled notifications
 	mu              sync.RWMutex
+}
+
+type scheduledLoad struct {
+	User          *user     `json:"user"`
+	ScheduledTime time.Time `json:"scheduled_time"`
 }
 
 // TimeRemaining calculates how much time is left on the machine
@@ -315,6 +322,7 @@ func main() {
 
 	srv.mux.HandleFunc("POST /identify", userIDResponseHandler)
 	srv.mux.Handle("/machine", userMiddleware(http.HandlerFunc(machineHandler)))
+	srv.mux.Handle("/schedule", userMiddleware(http.HandlerFunc(scheduleHandler)))
 	srv.mux.Handle("/", userMiddleware(http.HandlerFunc(indexHandler)))
 
 	tsLn, err := srv.tsnet.Listen("tcp", ":443")
@@ -450,6 +458,7 @@ func loadState() {
 		srv.state.Washer.Duration = savedState.Washer.Duration
 		srv.state.Washer.Waiter = savedState.Washer.Waiter
 		srv.state.Washer.WaitStartTime = savedState.Washer.WaitStartTime
+		srv.state.Washer.Scheduled = savedState.Washer.Scheduled
 
 		// Restart timers if machine is active
 		if srv.state.Washer.Active && !srv.state.Washer.StartTime.IsZero() {
@@ -457,6 +466,11 @@ func loadState() {
 			if remaining > 0 {
 				restartMachineTimer(srv.state.Washer, remaining)
 			}
+		}
+
+		// Restart scheduled notification if present
+		if srv.state.Washer.Scheduled != nil {
+			scheduleNotification(srv.state.Washer)
 		}
 	}
 
@@ -467,6 +481,7 @@ func loadState() {
 		srv.state.Dryer.Duration = savedState.Dryer.Duration
 		srv.state.Dryer.Waiter = savedState.Dryer.Waiter
 		srv.state.Dryer.WaitStartTime = savedState.Dryer.WaitStartTime
+		srv.state.Dryer.Scheduled = savedState.Dryer.Scheduled
 
 		// Restart timers if machine is active
 		if srv.state.Dryer.Active && !srv.state.Dryer.StartTime.IsZero() {
@@ -474,6 +489,11 @@ func loadState() {
 			if remaining > 0 {
 				restartMachineTimer(srv.state.Dryer, remaining)
 			}
+		}
+
+		// Restart scheduled notification if present
+		if srv.state.Dryer.Scheduled != nil {
+			scheduleNotification(srv.state.Dryer)
 		}
 	}
 
@@ -524,6 +544,7 @@ func restartMachineTimer(mch *machine, remaining time.Duration) {
 	}(ctx, remaining)
 }
 
+// indexHandler handles the index page requests
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	srv.DebugLog("indexHandler: Received request")
 	currentUser := r.Context().Value("userName")
@@ -810,31 +831,238 @@ func machineHandler(w http.ResponseWriter, r *http.Request) {
 	srv.DebugLog("machineHandler: Successfully handled request")
 }
 
-func parseDuration(durationParam string) time.Duration {
-	if durationParam == "" {
-		log.Println("parseDuration: No duration specified, using default 60 minutes")
-		return 60 * time.Minute
+func scheduleHandler(w http.ResponseWriter, r *http.Request) {
+	srv.DebugLog("scheduleHandler: Received request")
+	userName := r.Context().Value("userName").(string)
+	if userName == "" {
+		log.Println("scheduleHandler: User not identified")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
 	}
 
-	// Parse the duration as minutes (frontend sends just the number)
-	minutes, err := strconv.Atoi(durationParam)
+	srv.mu.RLock()
+	reqUser := srv.users[userName]
+	srv.mu.RUnlock()
+
+	if reqUser == nil {
+		log.Printf("scheduleHandler: Error retrieving user %s", userName)
+		http.Error(w, "User not found", http.StatusInternalServerError)
+		return
+	}
+
+	action := r.FormValue("action")
+	machineType := r.FormValue("machine")
+
+	if machineType == "" || (machineType != "washer" && machineType != "dryer") {
+		log.Println("scheduleHandler: Machine type not specified or invalid")
+		http.Error(w, "No machine type specified", http.StatusBadRequest)
+		return
+	}
+
+	var mch *machine
+	srv.mu.RLock()
+	if machineType == "washer" {
+		mch = srv.state.Washer
+	} else {
+		mch = srv.state.Dryer
+	}
+	srv.mu.RUnlock()
+
+	switch action {
+	case "schedule":
+		day := r.FormValue("day")
+		timeOfDay := r.FormValue("time")
+
+		scheduledTime, err := parseScheduledTime(day, timeOfDay)
+		if err != nil {
+			log.Printf("scheduleHandler: Failed to parse scheduled time: %v", err)
+			http.Error(w, "Invalid scheduled time", http.StatusBadRequest)
+			return
+		}
+
+		mch.mu.Lock()
+		// Cancel existing scheduled notification if present
+		if mch.scheduledCancel != nil {
+			mch.scheduledCancel()
+		}
+
+		mch.Scheduled = &scheduledLoad{
+			User:          reqUser,
+			ScheduledTime: scheduledTime,
+		}
+		mch.mu.Unlock()
+
+		// Start the scheduled notification
+		scheduleNotification(mch)
+
+		srv.DebugLog("scheduleHandler: User %s scheduled %s for %v", reqUser.Name, machineType, scheduledTime)
+		saveState()
+
+	case "cancel":
+		mch.mu.Lock()
+		if mch.Scheduled != nil && mch.Scheduled.User.NameLower == reqUser.NameLower {
+			// Cancel the scheduled notification
+			if mch.scheduledCancel != nil {
+				mch.scheduledCancel()
+				mch.scheduledCancel = nil
+			}
+			mch.Scheduled = nil
+			srv.DebugLog("scheduleHandler: User %s cancelled scheduled %s", reqUser.Name, machineType)
+		}
+		mch.mu.Unlock()
+		saveState()
+
+	default:
+		http.Error(w, "Invalid action", http.StatusBadRequest)
+		return
+	}
+
+	// Render the machine template
+	srv.mu.RLock()
+	data := struct {
+		Washer      *machine
+		Dryer       *machine
+		CurrentUser *user
+	}{
+		Washer:      srv.state.Washer,
+		Dryer:       srv.state.Dryer,
+		CurrentUser: reqUser,
+	}
+	srv.mu.RUnlock()
+
+	tmpl, err := template.ParseFS(assets, "assets/templates/machine.html")
 	if err != nil {
-		log.Printf("parseDuration: Failed to parse duration '%s', using default 60 minutes: %v", durationParam, err)
-		return 60 * time.Minute
+		log.Printf("scheduleHandler: Failed to parse template: %v", err)
+		http.Error(w, "Failed to parse template", http.StatusInternalServerError)
+		return
 	}
 
-	// Validate range (1-300 minutes as set in frontend)
-	if minutes < 1 {
-		log.Printf("parseDuration: Duration %d is too low, using minimum 1 minute", minutes)
-		minutes = 1
-	} else if minutes > 300 {
-		log.Printf("parseDuration: Duration %d is too high, using maximum 300 minutes", minutes)
-		minutes = 300
+	var templateName string
+	if r.FormValue("view") == "desktop" {
+		templateName = fmt.Sprintf("machine-row-%s", machineType)
+	} else {
+		templateName = fmt.Sprintf("machine-card-%s", machineType)
 	}
 
-	duration := time.Duration(minutes) * time.Minute
-	srv.DebugLog("parseDuration: Using duration of %d minutes (%v)", minutes, duration)
-	return duration
+	if err := tmpl.ExecuteTemplate(w, templateName, data); err != nil {
+		log.Printf("scheduleHandler: Failed to render template: %v", err)
+		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+		return
+	}
+}
+
+// parseScheduledTime parses the scheduled time from the request
+func parseScheduledTime(day string, timeOfDay string) (time.Time, error) {
+	now := time.Now()
+
+	// Parse day of week (0 = today, 1 = tomorrow, etc.)
+	dayOffset, err := strconv.Atoi(day)
+	if err != nil || dayOffset < 0 || dayOffset > 6 {
+		return time.Time{}, fmt.Errorf("invalid day offset: %s", day)
+	}
+
+	// Calculate target date
+	targetDate := now.AddDate(0, 0, dayOffset)
+
+	// Parse time of day
+	var hour int
+	switch timeOfDay {
+	case "morning":
+		hour = 8
+	case "afternoon":
+		hour = 13
+	case "evening":
+		hour = 18
+	case "night":
+		hour = 21
+	default:
+		return time.Time{}, fmt.Errorf("invalid time of day: %s", timeOfDay)
+	}
+
+	scheduledTime := time.Date(
+		targetDate.Year(),
+		targetDate.Month(),
+		targetDate.Day(),
+		hour,
+		0,
+		0,
+		0,
+		now.Location(),
+	)
+
+	return scheduledTime, nil
+}
+
+// parseDuration parses a duration string coming from form/query parameters.
+// It supports:
+// - empty string -> 0
+// - integer minutes (e.g. "90") -> 90 minutes
+// - float minutes (e.g. "90.5") -> 90.5 minutes
+// - Go duration strings (e.g. "1h30m", "45m")
+func parseDuration(val string) time.Duration {
+	if val == "" {
+		return 0
+	}
+
+	// Try integer minutes first
+	if mins, err := strconv.Atoi(val); err == nil {
+		return time.Duration(mins) * time.Minute
+	}
+
+	// Try Go duration string
+	if d, err := time.ParseDuration(val); err == nil {
+		return d
+	}
+
+	// Try float minutes
+	if f, err := strconv.ParseFloat(val, 64); err == nil {
+		return time.Duration(f * float64(time.Minute))
+	}
+
+	// Unknown format
+	return 0
+}
+
+// ScheduledTimeFormatted returns the scheduled time in a readable format
+func (mch *machine) ScheduledTimeFormatted() string {
+	mch.mu.RLock()
+	defer mch.mu.RUnlock()
+	if mch.Scheduled == nil {
+		return ""
+	}
+
+	now := time.Now()
+	scheduled := mch.Scheduled.ScheduledTime
+
+	// Determine time of day label
+	hour := scheduled.Hour()
+	var timeLabel string
+	switch {
+	case hour == 8:
+		timeLabel = "Morning"
+	case hour == 13:
+		timeLabel = "Afternoon"
+	case hour == 18:
+		timeLabel = "Evening"
+	case hour == 21:
+		timeLabel = "Night"
+	default:
+		timeLabel = scheduled.Format("3:04 PM")
+	}
+
+	// If it's today
+	if scheduled.Year() == now.Year() && scheduled.YearDay() == now.YearDay() {
+		return fmt.Sprintf("Today, %s", timeLabel)
+	}
+
+	// If it's tomorrow
+	tomorrow := now.Add(24 * time.Hour)
+	if scheduled.Year() == tomorrow.Year() && scheduled.YearDay() == tomorrow.YearDay() {
+		return fmt.Sprintf("Tomorrow, %s", timeLabel)
+	}
+
+	// Otherwise show day of week
+	return fmt.Sprintf("%s, %s", scheduled.Format("Mon"), timeLabel)
 }
 
 func (mch *machine) start(u *user, duration time.Duration) error {
@@ -910,6 +1138,13 @@ func (mch *machine) clear() error {
 		cancel()
 	}
 	mch.reminderCancels = make([]context.CancelFunc, 0)
+
+	// Cancel scheduled notification if present
+	if mch.scheduledCancel != nil {
+		mch.scheduledCancel()
+		mch.scheduledCancel = nil
+		log.Printf("clear: Cancelled scheduled notification for %s", machineName)
+	}
 
 	// Reset all machine state
 	mch.Active = false
@@ -1028,17 +1263,6 @@ type ntfyAction struct {
 	Body    string            `json:"body,omitempty"`
 }
 
-type ntfyMessage struct {
-	Topic    string       `json:"topic"`
-	Message  string       `json:"message"`
-	Title    string       `json:"title,omitempty"`
-	Priority string       `json:"priority,omitempty"`
-	Tags     []string     `json:"tags,omitempty"`
-	Icon     string       `json:"icon,omitempty"`
-	Click    string       `json:"click,omitempty"`
-	Actions  []ntfyAction `json:"actions,omitempty"`
-}
-
 func publishMessage(recipient string, machine string, event string, dryerAvailable bool) error {
 	srv.DebugLog("publishMessage: Preparing to publish message for recipient %s, machine %s, event %s", recipient, machine, event)
 	if recipient == "" || event == "" {
@@ -1063,6 +1287,12 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 			Label:  "Move to Dryer",
 			URL:    fmt.Sprintf("%s/machine?action=move&machine=%s", srv.serverBaseURL, machine),
 			Method: "GET",
+			Clear:  true,
+		}
+		viewAction = ntfyAction{
+			Action: "view",
+			Label:  "Open Laundromates",
+			URL:    srv.serverBaseURL,
 			Clear:  true,
 		}
 	)
@@ -1122,6 +1352,18 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 		if machine == "washer" && dryerAvailable {
 			actions = append(actions, moveAction)
 		}
+	case "schedule":
+		topic = fmt.Sprintf("laundromates-%s", recipient)
+		if machine == "washer" {
+			title = "🧼 Time to do laundry!"
+			msg = "Your scheduled wash time is now. The washer is ready for you."
+		} else {
+			title = "♨️ Time to dry your laundry!"
+			msg = "Your scheduled dryer time is now. The dryer is ready for you."
+		}
+		priority = "high"
+		tags = []string{"calendar", "alarm_clock"}
+		actions = []ntfyAction{viewAction}
 	default:
 		return fmt.Errorf("invalid event type: %s", event)
 	}
@@ -1304,4 +1546,56 @@ func identifyUser(r *http.Request) *user {
 
 	log.Printf("identifyUser: User %s created and added to users map", reqUser)
 	return newUser
+}
+
+// scheduleNotification schedules a notification for the user at the scheduled time
+func scheduleNotification(mch *machine) {
+	mch.mu.Lock()
+	if mch.Scheduled == nil {
+		mch.mu.Unlock()
+		return
+	}
+
+	scheduledTime := mch.Scheduled.ScheduledTime
+	userNameLower := mch.Scheduled.User.NameLower
+	machineName := mch.Name
+	mch.mu.Unlock()
+
+	// Calculate delay until scheduled time
+	delay := time.Until(scheduledTime)
+	if delay < 0 {
+		srv.DebugLog("scheduleNotification: Scheduled time for %s has already passed, not scheduling notification", machineName)
+		return
+	}
+
+	// Create a context for cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	mch.mu.Lock()
+	mch.scheduledCancel = cancel
+	mch.mu.Unlock()
+
+	srv.DebugLog("scheduleNotification: Scheduling notification for %s at %v (in %v)", machineName, scheduledTime, delay)
+
+	go func(ctx context.Context) {
+		select {
+		case <-time.After(delay):
+			srv.DebugLog("scheduleNotification: Sending scheduled notification for %s to %s", machineName, userNameLower)
+			dryerAvailable := srv.state.Dryer.User == nil
+			if err := publishMessage(userNameLower, machineName, "schedule", dryerAvailable); err != nil {
+				log.Printf("scheduleNotification: Failed to publish scheduled message: %v", err)
+			} else {
+				log.Printf("scheduleNotification: Successfully published scheduled message to topic laundromates-%s", userNameLower)
+			}
+
+			// Clear the scheduled load after notification
+			mch.mu.Lock()
+			mch.Scheduled = nil
+			mch.scheduledCancel = nil
+			mch.mu.Unlock()
+			saveState()
+
+		case <-ctx.Done():
+			srv.DebugLog("scheduleNotification: Scheduled notification cancelled for %s", machineName)
+		}
+	}(ctx)
 }

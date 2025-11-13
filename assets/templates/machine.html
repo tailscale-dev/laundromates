@@ -39,12 +39,19 @@
         {{end}}
     </td>
     <td>
+        {{if .Washer.Scheduled}}
+            {{.Washer.Scheduled.User.Name}} - {{.Washer.ScheduledTimeFormatted}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
         <div style="display: flex; gap: 5px; flex-wrap: wrap;">
             {{if not .Washer.User}}
                 <form hx-post="/machine" 
                       hx-target="#washer-row" 
                       hx-swap="innerHTML"
-                      style="display: inline;">
+                      style="display: inline-flex; gap: 5px; align-items: center;">
                     <input type="hidden" name="action" value="start">
                     <input type="hidden" name="machine" value="washer">
                     <input type="hidden" name="view" value="desktop">
@@ -54,11 +61,32 @@
                            min="1" 
                            max="300" 
                            class="duration-input"
-                           style="width: 60px; margin-right: 5px;">
+                           style="width: 60px;">
                     <button type="submit" class="btn btn-start" style="padding: 6px 12px; font-size: 14px;">
                         Start
                     </button>
                 </form>
+                {{if not .Washer.Scheduled}}
+                <button type="button" 
+                        class="btn btn-schedule" 
+                        style="padding: 6px 12px; font-size: 14px;"
+                        x-data
+                        @click="$dispatch('open-schedule-modal', {machine: 'washer', view: 'desktop'})">
+                    🕐
+                </button>
+                {{else if and .Washer.Scheduled (eq .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/schedule" 
+                      hx-target="#washer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-cancel-schedule" style="padding: 6px 12px; font-size: 14px;">
+                        Cancel
+                    </button>
+                </form>
+                {{end}}
             {{end}}
             {{if and .Washer.User (ne .Washer.User.NameLower .CurrentUser.NameLower) (not .Washer.Waiter)}}
                 <form hx-post="/machine" 
@@ -131,12 +159,19 @@
         {{end}}
     </td>
     <td>
+        {{if .Dryer.Scheduled}}
+            {{.Dryer.Scheduled.User.Name}} - {{.Dryer.ScheduledTimeFormatted}}
+        {{else}}
+            -
+        {{end}}
+    </td>
+    <td>
         <div style="display: flex; gap: 5px; flex-wrap: wrap;">
             {{if not .Dryer.User}}
                 <form hx-post="/machine" 
                       hx-target="#dryer-row" 
                       hx-swap="innerHTML"
-                      style="display: inline;">
+                      style="display: inline-flex; gap: 5px; align-items: center;">
                     <input type="hidden" name="action" value="start">
                     <input type="hidden" name="machine" value="dryer">
                     <input type="hidden" name="view" value="desktop">
@@ -146,11 +181,32 @@
                            min="1" 
                            max="300" 
                            class="duration-input"
-                           style="width: 60px; margin-right: 5px;">
+                           style="width: 60px;">
                     <button type="submit" class="btn btn-start" style="padding: 6px 12px; font-size: 14px;">
                         Start
                     </button>
                 </form>
+                {{if not .Dryer.Scheduled}}
+                <button type="button" 
+                        class="btn btn-schedule" 
+                        style="padding: 6px 12px; font-size: 14px;"
+                        x-data
+                        @click="$dispatch('open-schedule-modal', {machine: 'dryer', view: 'desktop'})">
+                    🕐
+                </button>
+                {{else if and .Dryer.Scheduled (eq .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/schedule" 
+                      hx-target="#dryer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <button type="submit" class="btn btn-cancel-schedule" style="padding: 6px 12px; font-size: 14px;">
+                        Cancel
+                    </button>
+                </form>
+                {{end}}
             {{end}}
             {{if and .Dryer.User (ne .Dryer.User.NameLower .CurrentUser.NameLower) (not .Dryer.Waiter)}}
                 <form hx-post="/machine" 
@@ -203,32 +259,58 @@
                         Waiting <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Washer.Waiter.Name}}</strong>
                     {{end}}
                 </div>
+            {{else if .Washer.Scheduled}}
+                <div class="status-badge status-scheduled">
+                    Scheduled: <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Washer.Scheduled.User.Name}}</strong>
+                </div>
             {{end}}
         </div>
         
         {{if not .Washer.User}}
             <!-- Available State -->
             <div class="machine-content">
-                <form hx-post="/machine" 
-                      hx-target="#washer-card" 
-                      hx-swap="innerHTML"
-                      class="mobile-timer-form">
-                    <input type="hidden" name="action" value="start">
-                    <input type="hidden" name="machine" value="washer">
-                    <input type="hidden" name="view" value="mobile">
-                    <div class="mobile-timer-controls">
+                {{if .Washer.Scheduled}}
+                    <div class="scheduled-info">📅 {{.Washer.ScheduledTimeFormatted}}</div>
+                {{end}}
+                <div class="mobile-timer-controls">
+                    <form hx-post="/machine" 
+                          hx-target="#washer-card" 
+                          hx-swap="innerHTML"
+                          class="mobile-timer-form">
+                        <input type="hidden" name="action" value="start">
+                        <input type="hidden" name="machine" value="washer">
+                        <input type="hidden" name="view" value="mobile">
                         <input type="number" 
                                name="duration" 
                                value="60" 
                                min="1" 
                                max="300" 
-                               class="duration-input-mobile"
-                               oninput="var el = this.parentElement.parentElement.parentElement.querySelector('.machine-duration'); if (el) el.textContent = this.value + 'm'">
+                               class="duration-input-mobile">
                         <button type="submit" class="btn btn-start btn-mobile-start">
                             Start
                         </button>
-                    </div>
-                </form>
+                    </form>
+                    {{if not .Washer.Scheduled}}
+                    <button type="button" 
+                            class="btn btn-schedule"
+                            x-data
+                            @click="$dispatch('open-schedule-modal', {machine: 'washer', view: 'mobile'})">
+                        🕐
+                    </button>
+                    {{else if and .Washer.Scheduled (eq .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                    <form hx-post="/schedule" 
+                          hx-target="#washer-card" 
+                          hx-swap="innerHTML"
+                          class="mobile-cancel-form">
+                        <input type="hidden" name="action" value="cancel">
+                        <input type="hidden" name="machine" value="washer">
+                        <input type="hidden" name="view" value="mobile">
+                        <button type="submit" class="btn btn-cancel-schedule">
+                            Cancel
+                        </button>
+                    </form>
+                    {{end}}
+                </div>
             </div>
         {{else if not .Washer.Waiter}}
             <!-- In Use State -->
@@ -320,32 +402,58 @@
                         Waiting <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Dryer.Waiter.Name}}</strong>
                     {{end}}
                 </div>
+            {{else if .Dryer.Scheduled}}
+                <div class="status-badge status-scheduled">
+                    Scheduled: <strong style="color: var(--primary-color); font-size: 1.00rem;">{{.Dryer.Scheduled.User.Name}}</strong>
+                </div>
             {{end}}
         </div>
         
         {{if not .Dryer.User}}
             <!-- Available State -->
             <div class="machine-content">
-                <form hx-post="/machine" 
-                      hx-target="#dryer-card" 
-                      hx-swap="innerHTML"
-                      class="mobile-timer-form">
-                    <input type="hidden" name="action" value="start">
-                    <input type="hidden" name="machine" value="dryer">
-                    <input type="hidden" name="view" value="mobile">
-                    <div class="mobile-timer-controls">
+                {{if .Dryer.Scheduled}}
+                    <div class="scheduled-info">📅 {{.Dryer.ScheduledTimeFormatted}}</div>
+                {{end}}
+                <div class="mobile-timer-controls">
+                    <form hx-post="/machine" 
+                          hx-target="#dryer-card" 
+                          hx-swap="innerHTML"
+                          class="mobile-timer-form">
+                        <input type="hidden" name="action" value="start">
+                        <input type="hidden" name="machine" value="dryer">
+                        <input type="hidden" name="view" value="mobile">
                         <input type="number" 
                                name="duration" 
                                value="60" 
                                min="1" 
                                max="300" 
-                               class="duration-input-mobile"
-                               oninput="var el = this.parentElement.parentElement.parentElement.querySelector('.machine-duration'); if (el) el.textContent = this.value + 'm'">
+                               class="duration-input-mobile">
                         <button type="submit" class="btn btn-start btn-mobile-start">
                             Start
                         </button>
-                    </div>
-                </form>
+                    </form>
+                    {{if not .Dryer.Scheduled}}
+                    <button type="button" 
+                            class="btn btn-schedule"
+                            x-data
+                            @click="$dispatch('open-schedule-modal', {machine: 'dryer', view: 'mobile'})">
+                        🕐
+                    </button>
+                    {{else if and .Dryer.Scheduled (eq .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                    <form hx-post="/schedule" 
+                          hx-target="#dryer-card" 
+                          hx-swap="innerHTML"
+                          class="mobile-cancel-form">
+                        <input type="hidden" name="action" value="cancel">
+                        <input type="hidden" name="machine" value="dryer">
+                        <input type="hidden" name="view" value="mobile">
+                        <button type="submit" class="btn btn-cancel-schedule">
+                            Cancel
+                        </button>
+                    </form>
+                    {{end}}
+                </div>
             </div>
         {{else if not .Dryer.Waiter}}
             <!-- In Use State -->
