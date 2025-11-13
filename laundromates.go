@@ -1385,7 +1385,7 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("Tags", strings.Join(tags, ","))
-	req.Header.Set("Icon", "https://cdn-icons-png.flaticon.com/512/3003/3003984.png")
+	req.Header.Set("Icon", fmt.Sprintf("%s/static/laundry.png", srv.serverBaseURL))
 	req.Header.Set("Click", srv.serverBaseURL)
 
 	// Add actions if we have any
