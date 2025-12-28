@@ -48,7 +48,9 @@ type server struct {
 	users          map[string]*user
 	mu             sync.RWMutex
 	serverBaseURL  string
+	nonTSURL       string
 	ntfyBaseURL    string
+	discordWebhook string
 	allowNonTS     bool
 	allowedDomains []string
 	debugEnabled   bool
@@ -193,6 +195,18 @@ func main() {
 	log.Printf("Using ntfy server: %s", srv.ntfyBaseURL)
 
 	srv.debugEnabled = os.Getenv("LAUNDROMATES_DEBUG") == "true"
+
+	// Configure non-Tailscale URL for notifications
+	srv.nonTSURL = os.Getenv("LAUNDROMATES_NON_TS_URL")
+	if srv.nonTSURL != "" {
+		log.Printf("Using non-Tailscale URL for notifications: %s", srv.nonTSURL)
+	}
+
+	// Configure Discord webhook
+	srv.discordWebhook = os.Getenv("LAUNDROMATES_DISCORD_WEBHOOK")
+	if srv.discordWebhook != "" {
+		log.Printf("Discord webhook notifications enabled")
+	}
 
 	// Configure non-Tailscale access
 	srv.allowNonTS = os.Getenv("LAUNDROMATES_ALLOW_NON_TS") == "true"
@@ -1263,10 +1277,40 @@ type ntfyAction struct {
 	Body    string            `json:"body,omitempty"`
 }
 
+type discordEmbed struct {
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Color       int                 `json:"color"`
+	Timestamp   string              `json:"timestamp,omitempty"`
+	Fields      []discordEmbedField `json:"fields,omitempty"`
+	Footer      *discordEmbedFooter `json:"footer,omitempty"`
+}
+
+type discordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type discordEmbedFooter struct {
+	Text string `json:"text"`
+}
+
+type discordMessage struct {
+	Content string         `json:"content,omitempty"`
+	Embeds  []discordEmbed `json:"embeds,omitempty"`
+}
+
 func publishMessage(recipient string, machine string, event string, dryerAvailable bool) error {
 	srv.DebugLog("publishMessage: Preparing to publish message for recipient %s, machine %s, event %s", recipient, machine, event)
 	if recipient == "" || event == "" {
 		return fmt.Errorf("recipient or event cannot be empty")
+	}
+
+	// Use non-TS URL if set, otherwise use server base URL
+	notificationURL := srv.serverBaseURL
+	if srv.nonTSURL != "" {
+		notificationURL = srv.nonTSURL
 	}
 
 	var (
@@ -1278,21 +1322,21 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 		clearAction = ntfyAction{
 			Action: "http",
 			Label:  "Clear",
-			URL:    fmt.Sprintf("%s/machine?action=clear&machine=%s", srv.serverBaseURL, machine),
+			URL:    fmt.Sprintf("%s/machine?action=clear&machine=%s", notificationURL, machine),
 			Method: "GET",
 			Clear:  true,
 		}
 		moveAction = ntfyAction{
 			Action: "http",
 			Label:  "Move to Dryer",
-			URL:    fmt.Sprintf("%s/machine?action=move&machine=%s", srv.serverBaseURL, machine),
+			URL:    fmt.Sprintf("%s/machine?action=move&machine=%s", notificationURL, machine),
 			Method: "GET",
 			Clear:  true,
 		}
 		viewAction = ntfyAction{
 			Action: "view",
 			Label:  "Open Laundromates",
-			URL:    srv.serverBaseURL,
+			URL:    notificationURL,
 			Clear:  true,
 		}
 	)
@@ -1385,8 +1429,8 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("Tags", strings.Join(tags, ","))
-	req.Header.Set("Icon", fmt.Sprintf("%s/static/laundry.png", srv.serverBaseURL))
-	req.Header.Set("Click", srv.serverBaseURL)
+	req.Header.Set("Icon", fmt.Sprintf("%s/static/laundry.png", notificationURL))
+	req.Header.Set("Click", notificationURL)
 
 	// Add actions if we have any
 	if len(actions) > 0 {
@@ -1425,6 +1469,73 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 	}
 
 	srv.DebugLog("publishMessage: Successfully published message to topic %s", topic)
+
+	// Publish to Discord if webhook is configured
+	if srv.discordWebhook != "" {
+		if err := publishDiscordMessage(recipient, machine, event, title, msg); err != nil {
+			log.Printf("publishMessage: Failed to publish Discord message: %v", err)
+			// Don't return error, continue with success since ntfy worked
+		} else {
+			srv.DebugLog("publishMessage: Successfully published Discord message")
+		}
+	}
+
+	return nil
+}
+
+func publishDiscordMessage(recipient string, machine string, event string, title string, message string) error {
+	srv.DebugLog("publishDiscordMessage: Preparing Discord message for recipient %s, machine %s, event %s", recipient, machine, event)
+
+	// Use non-TS URL if set, otherwise use server base URL
+	notificationURL := srv.serverBaseURL
+	if srv.nonTSURL != "" {
+		notificationURL = srv.nonTSURL
+	}
+
+	// Format the message with user name and clickable link
+	userName := strings.Title(recipient)
+	formattedMessage := fmt.Sprintf("%s — [View](%s)\n*%s*, %s", title, notificationURL, userName, strings.ToLower(string(message[0]))+message[1:])
+
+	discordMsg := discordMessage{
+		Content: formattedMessage,
+	}
+
+	payload, err := json.Marshal(discordMsg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Discord message: %w", err)
+	}
+
+	client := srv.tsnet.HTTPClient()
+	if client == nil {
+		// Fallback to default HTTP client if Tailscale client not available
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	req, err := http.NewRequest("POST", srv.discordWebhook, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create Discord HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	srv.DebugLog("publishDiscordMessage: POST %s", req.URL.String())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send Discord message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		respBody = []byte("failed to read response")
+	}
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Discord webhook returned status code: %d, response: %s", resp.StatusCode, string(respBody))
+	}
+
+	srv.DebugLog("publishDiscordMessage: Successfully sent Discord message")
 	return nil
 }
 
