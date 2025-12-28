@@ -14,6 +14,8 @@ services:
       - LAUNDROMATES_ALLOW_NON_TS=${LAUNDROMATES_ALLOW_NON_TS:-false}
       # - LAUNDROMATES_ALLOWED_DOMAINS= # Uncomment and set allowed domains if you want to restrict external (invited or node sharing) users
       # - LAUNDROMATES_DEBUG=true # Uncomment to enable debug mode
+      # - LAUNDROMATES_DISCORD_WEBHOOK= # Uncomment and set to your webhook URL if you want Discord notifications
+      # - LAUNDROMATES_NON_TS_URL= # Uncomment and set to override the URL used in ntfy and Discord notifications
     volumes:
       - laundromates-state:/app/state
 

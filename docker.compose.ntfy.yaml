@@ -28,6 +28,7 @@ services:
       - LAUNDROMATES_NTFY_SERVER=https://ntfy.${TS_MAGICDNS_DOMAIN}
       - LAUNDROMATES_ALLOW_NON_TS=${LAUNDROMATES_ALLOW_NON_TS:-false} # Additional DNS/network configuration may be required for non-Tailscale access
       # - LAUNDROMATES_ALLOWED_DOMAINS= # Uncomment and set allowed domains if you want to restrict external (invited or node sharing) users
+      # - LAUNDROMATES_NON_TS_URL= # Uncomment and set to override the URL used in ntfy and Discord notifications
     volumes:
       - laundromates-state:/app/state
 
