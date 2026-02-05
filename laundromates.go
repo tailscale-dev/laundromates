@@ -59,16 +59,17 @@ type server struct {
 var srv *server = &server{}
 
 type user struct {
-	Name      string   `json:"name"`
-	NameLower string   `json:"name_lower"`
-	IPs       []string `json:"ips,omitempty"` // Only used if LAUNDROMATES_ALLOW_NON_TS is true
+	Name          string   `json:"name"`
+	NameLower     string   `json:"name_lower"`
+	SanitizedName string   `json:"sanitized_name"` // Name sanitized for ntfy topic usage
+	IPs           []string `json:"ips,omitempty"`  // Only used if LAUNDROMATES_ALLOW_NON_TS is true
 }
 
 type machine struct {
 	Active          bool                 `json:"active"`
 	Name            string               `json:"name"` // "washer" or "dryer"
 	User            *user                `json:"user,omitempty"`
-	Timer           *time.Timer          `json:"-"` // Keep for ntfy notifications
+	Timer           *time.Timer          `json:"-"`
 	StartTime       time.Time            `json:"start_time,omitempty"`
 	Duration        time.Duration        `json:"duration,omitempty"`
 	Waiter          *user                `json:"waiter,omitempty"`
@@ -168,6 +169,14 @@ func (srv *server) DebugLog(format string, v ...interface{}) {
 	}
 }
 
+// sanitizeNtfyTopic sanitizes a username for use in ntfy topic names
+// by replacing spaces and @ symbols with dashes
+func sanitizeNtfyTopic(name string) string {
+	sanitized := strings.ReplaceAll(name, " ", "-")
+	sanitized = strings.ReplaceAll(sanitized, "@", "-")
+	return sanitized
+}
+
 func main() {
 	log.Println("Starting Laundromates server...")
 
@@ -180,8 +189,20 @@ func main() {
 		log.Fatalf("Failed to check state directory: %v", err)
 	}
 
-	if os.Getenv("TS_AUTHKEY") == "" {
-		log.Fatal("TS_AUTHKEY environment variable is not set")
+	// Configure Tailscale client credentials
+	clientSecret := os.Getenv("TS_CLIENT_SECRET")
+	clientID := os.Getenv("TS_CLIENT_ID")
+
+	// Validate authentication configuration
+	hasOAuth := clientSecret != "" && clientID != ""
+	hasAuthKey := os.Getenv("TS_AUTHKEY") != ""
+
+	if hasOAuth {
+		log.Println("Using TS_CLIENT_SECRET and TS_CLIENT_ID for OAuth authentication")
+	} else if !hasAuthKey {
+		log.Fatal("Either TS_AUTHKEY or both TS_CLIENT_SECRET and TS_CLIENT_ID must be set")
+	} else if (clientSecret != "" && clientID == "") || (clientSecret == "" && clientID != "") {
+		log.Fatal("Both TS_CLIENT_SECRET and TS_CLIENT_ID must be set together for OAuth authentication")
 	}
 
 	// Configure ntfy server
@@ -233,6 +254,33 @@ func main() {
 		hostname = "laundromates"
 	}
 
+	// Configure control server URL
+	controlURL := os.Getenv("TS_CONTROL_URL")
+	if controlURL != "" {
+		log.Printf("Using custom control URL: %s", controlURL)
+	}
+
+	// Configure advertise tags
+	var advertiseTags []string
+	advertiseTagsStr := os.Getenv("TS_ADVERTISE_TAGS")
+	if advertiseTagsStr != "" {
+		tags := strings.Split(advertiseTagsStr, ",")
+		for _, tag := range tags {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				advertiseTags = append(advertiseTags, tag)
+			}
+		}
+		log.Printf("Advertising tags: %v", advertiseTags)
+	}
+
+	// Configure HTTP port
+	httpPort := os.Getenv("LAUNDROMATES_HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "12012"
+	}
+	log.Printf("HTTP server will listen on port %s", httpPort)
+
 	log.Println("Starting Tailscale...")
 	if _, err := os.Stat("state/tsnet"); os.IsNotExist(err) {
 		log.Println("State directory for Tailscale does not exist, creating...")
@@ -243,10 +291,14 @@ func main() {
 		log.Fatalf("Failed to check Tailscale state directory: %v", err)
 	}
 	srv.tsnet = &tsnet.Server{
-		Hostname:  hostname,
-		AuthKey:   os.Getenv("TS_AUTHKEY"),
-		Ephemeral: true,
-		Dir:       "state/tsnet",
+		Hostname:      hostname,
+		AuthKey:       os.Getenv("TS_AUTHKEY"),
+		ClientSecret:  clientSecret,
+		ClientID:      clientID,
+		ControlURL:    controlURL,
+		AdvertiseTags: advertiseTags,
+		Ephemeral:     true,
+		Dir:           "state/tsnet",
 	}
 	if err := srv.tsnet.Start(); err != nil {
 		log.Fatalf("Failed to start Tailscale: %v", err)
@@ -361,10 +413,11 @@ func main() {
 		TLSConfig: tlsConfig,
 	}
 
-	// Listen on all interfaces on port 12012 (HTTP only)
-	httpLn, err := net.Listen("tcp", ":12012")
+	// Listen on all interfaces on configured HTTP port
+	httpAddr := ":" + httpPort
+	httpLn, err := net.Listen("tcp", httpAddr)
 	if err != nil {
-		log.Fatalf("Failed to listen on port 12012: %v", err)
+		log.Fatalf("Failed to listen on port %s: %v", httpPort, err)
 	}
 	defer httpLn.Close()
 
@@ -372,7 +425,7 @@ func main() {
 		Handler: srv.mux,
 	}
 
-	srv.DebugLog("Server started on :443 (Tailscale HTTPS) and :12012 (HTTP)")
+	srv.DebugLog("Server started on :443 (Tailscale HTTPS) and :%s (HTTP)", httpPort)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -464,6 +517,13 @@ func loadState() {
 	srv.users = savedState.Users
 	srv.state.Users = savedState.Users
 
+	// Ensure all users have SanitizedName set (for backward compatibility)
+	for _, u := range srv.users {
+		if u.SanitizedName == "" {
+			u.SanitizedName = sanitizeNtfyTopic(u.NameLower)
+		}
+	}
+
 	// Restore machine states
 	if savedState.Washer != nil {
 		srv.state.Washer.Active = savedState.Washer.Active
@@ -547,10 +607,10 @@ func restartMachineTimer(mch *machine, remaining time.Duration) {
 	go func(ctx context.Context, delay time.Duration) {
 		select {
 		case <-time.After(delay):
-			if err := publishMessage(mch.User.NameLower, mch.Name, "start", dryerAvailable); err != nil {
+			if err := publishMessage(mch.User.SanitizedName, mch.Name, "start", dryerAvailable); err != nil {
 				log.Printf("restartMachineTimer: Failed to publish completion message: %v", err)
 			} else {
-				log.Printf("restartMachineTimer: Successfully published completion message to topic laundromates-%s", mch.User.NameLower)
+				log.Printf("restartMachineTimer: Successfully published completion message to topic laundromates-%s", mch.User.SanitizedName)
 			}
 		case <-ctx.Done():
 			log.Printf("restartMachineTimer: Scheduled completion message cancelled for %s", mch.Name)
@@ -582,12 +642,22 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ntfyURL := srv.ntfyBaseURL + "laundromates-" + cu.NameLower
+	// Ensure SanitizedName is set (defensive programming)
+	srv.mu.Lock()
+	if cu.SanitizedName == "" {
+		cu.SanitizedName = sanitizeNtfyTopic(cu.NameLower)
+		log.Printf("indexHandler: Set SanitizedName for user %s to %s", cu.Name, cu.SanitizedName)
+	}
+	srv.mu.Unlock()
+
+	ntfyURL := srv.ntfyBaseURL + "laundromates-" + cu.SanitizedName
 	if strings.HasPrefix(ntfyURL, "https://") {
 		ntfyURL = strings.TrimPrefix(ntfyURL, "https://")
 	} else if strings.HasPrefix(ntfyURL, "http://") {
 		ntfyURL = strings.TrimPrefix(ntfyURL, "http://")
 	}
+
+	srv.DebugLog("indexHandler: ntfyURL constructed as: %s", ntfyURL)
 
 	srv.mu.RLock()
 	data := struct {
@@ -655,9 +725,10 @@ func userIDResponseHandler(w http.ResponseWriter, r *http.Request) {
 	if !exists {
 		log.Printf("userIDResponseHandler: User %s not found, creating new user", name)
 		newUser := &user{
-			Name:      name,
-			NameLower: nameLower,
-			IPs:       []string{},
+			Name:          name,
+			NameLower:     nameLower,
+			SanitizedName: sanitizeNtfyTopic(nameLower),
+			IPs:           []string{},
 		}
 		srv.users[nameLower] = newUser
 		reqUser = newUser
@@ -1099,17 +1170,17 @@ func (mch *machine) start(u *user, duration time.Duration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	mch.cancelFunc = cancel
 
-	userNameLower := u.NameLower
+	userSanitizedName := u.SanitizedName
 	machineName := mch.Name
 	dryerAvailable := srv.state.Dryer.User == nil
 	go func(ctx context.Context, delay time.Duration) {
 		select {
 		case <-time.After(delay):
 			mch.mu.RLock()
-			if err := publishMessage(userNameLower, machineName, "start", dryerAvailable); err != nil {
+			if err := publishMessage(userSanitizedName, machineName, "start", dryerAvailable); err != nil {
 				log.Printf("start: Failed to publish completion message: %v", err)
 			} else {
-				log.Printf("start: Successfully published completion message to topic laundromates-%s", userNameLower)
+				log.Printf("start: Successfully published completion message to topic laundromates-%s", userSanitizedName)
 			}
 			mch.mu.RUnlock()
 		case <-ctx.Done():
@@ -1134,10 +1205,10 @@ func (mch *machine) clear() error {
 	// Capture values while holding lock
 	userName := mch.User.Name
 	machineName := mch.Name
-	var waiterNameLower string
+	var waiterSanitizedName string
 	hasWaiter := mch.Waiter != nil
 	if hasWaiter {
-		waiterNameLower = mch.Waiter.NameLower
+		waiterSanitizedName = mch.Waiter.SanitizedName
 	}
 
 	// Cancel any scheduled completion notification
@@ -1177,7 +1248,7 @@ func (mch *machine) clear() error {
 	if hasWaiter {
 		srv.DebugLog("clear: Notifying waiting user")
 		go func() {
-			if err := publishMessage(waiterNameLower, machineName, "clear", dryerAvailable); err != nil {
+			if err := publishMessage(waiterSanitizedName, machineName, "clear", dryerAvailable); err != nil {
 				log.Printf("clear: Failed to publish clear message to waiting user: %v", err)
 			}
 		}()
@@ -1205,13 +1276,14 @@ func (mch *machine) request(u *user) error {
 		srv.DebugLog("request: User %s is now waiting for machine %s", u.Name, mch.Name)
 
 		// Capture values for goroutine while holding lock
-		currentUserNameLower := mch.User.NameLower
+		currentUserSanitizedName := mch.User.SanitizedName
+		waiterSanitizedName := u.SanitizedName
 		waiterNameLower := u.NameLower
 		waiterName := u.Name
 		machineName := mch.Name
 		dryerAvailable := srv.state.Dryer.User == nil
 
-		if err := publishMessage(currentUserNameLower, machineName, "request", dryerAvailable); err != nil {
+		if err := publishMessage(currentUserSanitizedName, machineName, "request", dryerAvailable); err != nil {
 			log.Printf("request: Failed to publish request message: %v", err)
 			return fmt.Errorf("failed to publish request message: %w", err)
 		}
@@ -1249,10 +1321,10 @@ func (mch *machine) request(u *user) error {
 					}
 
 					srv.DebugLog("request: Sending reminder notification for %s to %s", machineName, waiterName)
-					if err := publishMessage(waiterNameLower, machineName, "reminder", dryerAvailable); err != nil {
+					if err := publishMessage(waiterSanitizedName, machineName, "reminder", dryerAvailable); err != nil {
 						log.Printf("request: Failed to publish reminder message: %v", err)
 					} else {
-						srv.DebugLog("request: Successfully published reminder message to topic laundromates-%s", waiterNameLower)
+						srv.DebugLog("request: Successfully published reminder message to topic laundromates-%s", waiterSanitizedName)
 					}
 
 				case <-reminderCtx.Done():
@@ -1417,7 +1489,6 @@ func publishMessage(recipient string, machine string, event string, dryerAvailab
 		return fmt.Errorf("failed to get Tailscale HTTP client")
 	}
 
-	// Use the header-based approach that we know works
 	topicURL := strings.TrimSuffix(srv.ntfyBaseURL, "/") + "/" + topic
 
 	req, err := http.NewRequest("POST", topicURL, strings.NewReader(msg))
@@ -1641,18 +1712,31 @@ func identifyUser(r *http.Request) *user {
 
 	if exists {
 		log.Printf("identifyUser: User %s identified with existing profile", reqUser)
+		// Ensure SanitizedName is set even for existing users
+		if u.SanitizedName == "" {
+			srv.mu.Lock()
+			u.SanitizedName = sanitizeNtfyTopic(u.NameLower)
+			log.Printf("identifyUser: Set SanitizedName for existing user %s to %s", u.Name, u.SanitizedName)
+			srv.mu.Unlock()
+		}
 		return u
 	}
 
 	log.Printf("identifyUser: New user %s identified, creating profile", reqUser)
+	lowerName := strings.ToLower(reqUser)
+	sanitizedName := sanitizeNtfyTopic(lowerName)
+	log.Printf("identifyUser: lowerName=%s, sanitizedName=%s", lowerName, sanitizedName)
+
 	newUser := &user{
-		Name:      reqUser,
-		NameLower: strings.ToLower(reqUser),
-		IPs:       []string{},
+		Name:          reqUser,
+		NameLower:     lowerName,
+		SanitizedName: sanitizedName,
+		IPs:           []string{},
 	}
 
 	srv.mu.Lock()
-	srv.users[strings.ToLower(reqUser)] = newUser
+	srv.users[lowerName] = newUser
+	log.Printf("identifyUser: Stored user with key '%s', SanitizedName='%s'", lowerName, newUser.SanitizedName)
 	srv.mu.Unlock()
 
 	log.Printf("identifyUser: User %s created and added to users map", reqUser)
@@ -1668,7 +1752,7 @@ func scheduleNotification(mch *machine) {
 	}
 
 	scheduledTime := mch.Scheduled.ScheduledTime
-	userNameLower := mch.Scheduled.User.NameLower
+	userSanitizedName := mch.Scheduled.User.SanitizedName
 	machineName := mch.Name
 	mch.mu.Unlock()
 
@@ -1690,12 +1774,12 @@ func scheduleNotification(mch *machine) {
 	go func(ctx context.Context) {
 		select {
 		case <-time.After(delay):
-			srv.DebugLog("scheduleNotification: Sending scheduled notification for %s to %s", machineName, userNameLower)
+			srv.DebugLog("scheduleNotification: Sending scheduled notification for %s to %s", machineName, userSanitizedName)
 			dryerAvailable := srv.state.Dryer.User == nil
-			if err := publishMessage(userNameLower, machineName, "schedule", dryerAvailable); err != nil {
+			if err := publishMessage(userSanitizedName, machineName, "schedule", dryerAvailable); err != nil {
 				log.Printf("scheduleNotification: Failed to publish scheduled message: %v", err)
 			} else {
-				log.Printf("scheduleNotification: Successfully published scheduled message to topic laundromates-%s", userNameLower)
+				log.Printf("scheduleNotification: Successfully published scheduled message to topic laundromates-%s", userSanitizedName)
 			}
 
 			// Clear the scheduled load after notification
