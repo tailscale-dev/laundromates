@@ -86,6 +86,20 @@
                     </button>
                 </form>
                 {{end}}
+                {{if and .Washer.Scheduled .IsAdmin (ne .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/schedule"
+                      hx-target="#washer-row"
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="hidden" name="admin" value="true">
+                    <button type="submit" class="btn btn-admin-clear" style="padding: 6px 12px; font-size: 14px;" title="Admin: cancel without notification">
+                        ⚙ Cancel
+                    </button>
+                </form>
+                {{end}}
             {{end}}
             {{if and .Washer.User (ne .Washer.User.NameLower .CurrentUser.NameLower) (not .Washer.Waiter)}}
                 <form hx-post="/machine" 
@@ -110,6 +124,20 @@
                     <input type="hidden" name="view" value="desktop">
                     <button type="submit" class="btn btn-clear" style="padding: 6px 12px; font-size: 14px;">
                         Clear
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Washer.User .IsAdmin (ne .Washer.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/machine" 
+                      hx-target="#washer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="clear">
+                    <input type="hidden" name="machine" value="washer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="hidden" name="admin" value="true">
+                    <button type="submit" class="btn btn-admin-clear" style="padding: 6px 12px; font-size: 14px;" title="Admin: clear without notification">
+                        ⚙ Clear
                     </button>
                 </form>
             {{end}}
@@ -205,6 +233,20 @@
                     </button>
                 </form>
                 {{end}}
+                {{if and .Dryer.Scheduled .IsAdmin (ne .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/schedule"
+                      hx-target="#dryer-row"
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="hidden" name="admin" value="true">
+                    <button type="submit" class="btn btn-admin-clear" style="padding: 6px 12px; font-size: 14px;" title="Admin: cancel without notification">
+                        ⚙ Cancel
+                    </button>
+                </form>
+                {{end}}
             {{end}}
             {{if and .Dryer.User (ne .Dryer.User.NameLower .CurrentUser.NameLower) (not .Dryer.Waiter)}}
                 <form hx-post="/machine" 
@@ -229,6 +271,20 @@
                     <input type="hidden" name="view" value="desktop">
                     <button type="submit" class="btn btn-clear" style="padding: 6px 12px; font-size: 14px;">
                         Clear
+                    </button>
+                </form>
+            {{end}}
+            {{if and .Dryer.User .IsAdmin (ne .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                <form hx-post="/machine" 
+                      hx-target="#dryer-row" 
+                      hx-swap="innerHTML"
+                      style="display: inline;">
+                    <input type="hidden" name="action" value="clear">
+                    <input type="hidden" name="machine" value="dryer">
+                    <input type="hidden" name="view" value="desktop">
+                    <input type="hidden" name="admin" value="true">
+                    <button type="submit" class="btn btn-admin-clear" style="padding: 6px 12px; font-size: 14px;" title="Admin: clear without notification">
+                        ⚙ Clear
                     </button>
                 </form>
             {{end}}
@@ -307,6 +363,20 @@
                         </button>
                     </form>
                     {{end}}
+                    {{if and .Washer.Scheduled .IsAdmin (ne .Washer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                    <form hx-post="/schedule"
+                          hx-target="#washer-card"
+                          hx-swap="innerHTML"
+                          class="mobile-cancel-form">
+                        <input type="hidden" name="action" value="cancel">
+                        <input type="hidden" name="machine" value="washer">
+                        <input type="hidden" name="view" value="mobile">
+                        <input type="hidden" name="admin" value="true">
+                        <button type="submit" class="btn btn-admin-clear" title="Admin: cancel without notification">
+                            ⚙ Cancel
+                        </button>
+                    </form>
+                    {{end}}
                 </div>
             </div>
         {{else if not .Washer.Waiter}}
@@ -330,6 +400,19 @@
                                 Request
                             </button>
                         </form>
+                        {{if .IsAdmin}}
+                        <form hx-post="/machine" 
+                              hx-target="#washer-card" 
+                              hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="clear">
+                            <input type="hidden" name="machine" value="washer">
+                            <input type="hidden" name="view" value="mobile">
+                            <input type="hidden" name="admin" value="true">
+                            <button type="submit" class="btn btn-admin-clear" title="Admin: clear without notification">
+                                ⚙ Clear
+                            </button>
+                        </form>
+                        {{end}}
                 {{else if and .Washer.User (eq .Washer.User.NameLower .CurrentUser.NameLower)}}
                 
                     <form hx-post="/machine" 
@@ -368,6 +451,19 @@
                             <input type="hidden" name="view" value="mobile">
                             <button type="submit" class="btn btn-clear">
                                 Clear
+                            </button>
+                        </form>
+                        {{end}}
+                        {{if and .Washer.User .IsAdmin (ne .Washer.User.NameLower .CurrentUser.NameLower)}}
+                        <form hx-post="/machine" 
+                                hx-target="#washer-card" 
+                                hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="clear">
+                            <input type="hidden" name="machine" value="washer">
+                            <input type="hidden" name="view" value="mobile">
+                            <input type="hidden" name="admin" value="true">
+                            <button type="submit" class="btn btn-admin-clear" title="Admin: clear without notification">
+                                ⚙ Clear
                             </button>
                         </form>
                         {{end}}
@@ -449,6 +545,20 @@
                         </button>
                     </form>
                     {{end}}
+                    {{if and .Dryer.Scheduled .IsAdmin (ne .Dryer.Scheduled.User.NameLower .CurrentUser.NameLower)}}
+                    <form hx-post="/schedule"
+                          hx-target="#dryer-card"
+                          hx-swap="innerHTML"
+                          class="mobile-cancel-form">
+                        <input type="hidden" name="action" value="cancel">
+                        <input type="hidden" name="machine" value="dryer">
+                        <input type="hidden" name="view" value="mobile">
+                        <input type="hidden" name="admin" value="true">
+                        <button type="submit" class="btn btn-admin-clear" title="Admin: cancel without notification">
+                            ⚙ Cancel
+                        </button>
+                    </form>
+                    {{end}}
                 </div>
             </div>
         {{else if not .Dryer.Waiter}}
@@ -472,6 +582,19 @@
                             Request
                             </button>
                         </form>
+                        {{if .IsAdmin}}
+                        <form hx-post="/machine" 
+                              hx-target="#dryer-card" 
+                              hx-swap="innerHTML">
+                            <input type="hidden" name="action" value="clear">
+                            <input type="hidden" name="machine" value="dryer">
+                            <input type="hidden" name="view" value="mobile">
+                            <input type="hidden" name="admin" value="true">
+                            <button type="submit" class="btn btn-admin-clear" title="Admin: clear without notification">
+                                ⚙ Clear
+                            </button>
+                        </form>
+                        {{end}}
                     {{else if and .Dryer.User (eq .Dryer.User.NameLower .CurrentUser.NameLower)}}
                     <form hx-post="/machine" 
                           hx-target="#dryer-card" 
@@ -509,6 +632,19 @@
                                 <input type="hidden" name="view" value="mobile">
                                 <button type="submit" class="btn btn-clear">
                                     Clear
+                                </button>
+                            </form>
+                        {{end}}
+                        {{if and .Dryer.User .IsAdmin (ne .Dryer.User.NameLower .CurrentUser.NameLower)}}
+                            <form hx-post="/machine" 
+                                hx-target="#dryer-card" 
+                                hx-swap="innerHTML">
+                                <input type="hidden" name="action" value="clear">
+                                <input type="hidden" name="machine" value="dryer">
+                                <input type="hidden" name="view" value="mobile">
+                                <input type="hidden" name="admin" value="true">
+                                <button type="submit" class="btn btn-admin-clear" title="Admin: clear without notification">
+                                    ⚙ Clear
                                 </button>
                             </form>
                         {{end}}

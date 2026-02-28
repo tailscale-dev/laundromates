@@ -35,11 +35,44 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
 
 //go:embed assets/static/* assets/templates/*
 var assets embed.FS
+
+// Prometheus metrics
+
+var (
+	machineActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "laundromates_machine_active",
+		Help: "Whether a machine is currently active (1) or not (0).",
+	}, []string{"machine"})
+
+	machineRemainingSeconds = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "laundromates_machine_remaining_seconds",
+		Help: "Seconds remaining on an active machine timer.",
+	}, []string{"machine"})
+
+	machineUser = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "laundromates_machine_has_user",
+		Help: "Whether a machine has an assigned user (1) or not (0).",
+	}, []string{"machine"})
+
+	machineWaiter = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "laundromates_machine_has_waiter",
+		Help: "Whether someone is waiting for a machine (1) or not (0).",
+	}, []string{"machine"})
+
+	registeredUsers = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "laundromates_registered_users",
+		Help: "Total number of registered users.",
+	})
+)
 
 type server struct {
 	mux            *http.ServeMux
@@ -167,6 +200,47 @@ func (srv *server) DebugLog(format string, v ...interface{}) {
 	if srv.debugEnabled {
 		log.Printf(format, v...)
 	}
+}
+
+// aclCap is the Tailscale ACL capability for laundromates admin access.
+const aclCap tailcfg.PeerCapability = "github.com/tailscale-dev/cap/laundromates"
+
+// aclGrant defines the access control rule granting laundromates permissions.
+type aclGrant struct {
+	// Role is currently only "admin".
+	Role string `json:"role"`
+}
+
+// isAdminUser checks whether the requesting Tailscale peer holds the admin
+// role via an ACL capability grant.
+func isAdminUser(r *http.Request) bool {
+	if r.RemoteAddr == "" {
+		return false
+	}
+	ip := strings.Split(r.RemoteAddr, ":")[0]
+	if !strings.HasPrefix(ip, "100.") && !strings.HasPrefix(ip, "fd7a:") {
+		return false
+	}
+	lc, err := srv.tsnet.LocalClient()
+	if err != nil {
+		log.Printf("isAdminUser: Failed to get local client: %v", err)
+		return false
+	}
+	who, err := lc.WhoIs(r.Context(), r.RemoteAddr)
+	if err != nil || who == nil {
+		return false
+	}
+	grants, err := tailcfg.UnmarshalCapJSON[aclGrant](who.CapMap, aclCap)
+	if err != nil {
+		log.Printf("isAdminUser: Failed to unmarshal ACL grants: %v", err)
+		return false
+	}
+	for _, g := range grants {
+		if strings.EqualFold(g.Role, "admin") {
+			return true
+		}
+	}
+	return false
 }
 
 // sanitizeNtfyTopic sanitizes a username for use in ntfy topic names
@@ -386,6 +460,8 @@ func main() {
 	}
 	srv.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
+	srv.mux.HandleFunc("GET /healthz", healthHandler)
+	srv.mux.Handle("GET /metrics", promhttp.Handler())
 	srv.mux.HandleFunc("POST /identify", userIDResponseHandler)
 	srv.mux.Handle("/machine", userMiddleware(http.HandlerFunc(machineHandler)))
 	srv.mux.Handle("/schedule", userMiddleware(http.HandlerFunc(scheduleHandler)))
@@ -618,6 +694,73 @@ func restartMachineTimer(mch *machine, remaining time.Duration) {
 	}(ctx, remaining)
 }
 
+// healthHandler returns a simple health check response.
+// Returns 200 OK when the server is running and Tailscale is connected.
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	lc, err := srv.tsnet.LocalClient()
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, `{"status":"unhealthy","reason":"tailscale client unavailable: %s"}`, err)
+		return
+	}
+
+	status, err := lc.Status(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, `{"status":"unhealthy","reason":"tailscale status unavailable: %s"}`, err)
+		return
+	}
+
+	if status.BackendState != "Running" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, `{"status":"unhealthy","reason":"tailscale not running","state":"%s"}`, status.BackendState)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	srv.mu.RLock()
+	washerActive := srv.state.Washer.Active
+	dryerActive := srv.state.Dryer.Active
+	userCount := len(srv.users)
+	srv.mu.RUnlock()
+
+	fmt.Fprintf(w, `{"status":"healthy","tailscale":"%s","washer_active":%t,"dryer_active":%t,"users":%d}`,
+		status.BackendState, washerActive, dryerActive, userCount)
+}
+
+// updatePrometheusMetrics updates the Prometheus gauge metrics with current state.
+func updatePrometheusMetrics() {
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+
+	for _, mch := range []*machine{srv.state.Washer, srv.state.Dryer} {
+		name := mch.Name
+		if mch.Active {
+			machineActive.WithLabelValues(name).Set(1)
+			machineRemainingSeconds.WithLabelValues(name).Set(mch.TimeRemaining().Seconds())
+		} else {
+			machineActive.WithLabelValues(name).Set(0)
+			machineRemainingSeconds.WithLabelValues(name).Set(0)
+		}
+
+		if mch.User != nil {
+			machineUser.WithLabelValues(name).Set(1)
+		} else {
+			machineUser.WithLabelValues(name).Set(0)
+		}
+
+		if mch.Waiter != nil {
+			machineWaiter.WithLabelValues(name).Set(1)
+		} else {
+			machineWaiter.WithLabelValues(name).Set(0)
+		}
+	}
+
+	registeredUsers.Set(float64(len(srv.users)))
+}
+
 // indexHandler handles the index page requests
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	srv.DebugLog("indexHandler: Received request")
@@ -659,6 +802,9 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 
 	srv.DebugLog("indexHandler: ntfyURL constructed as: %s", ntfyURL)
 
+	isAdminCap, _ := r.Context().Value("isAdminCap").(bool)
+	isAdmin, _ := r.Context().Value("isAdmin").(bool)
+
 	srv.mu.RLock()
 	data := struct {
 		Washer        *machine
@@ -666,11 +812,15 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		CurrentUser   *user
 		NtfyURL       string
 		NtfyMobileURL string
+		IsAdmin       bool
+		IsAdminCap    bool
 	}{
 		Washer:      srv.state.Washer,
 		Dryer:       srv.state.Dryer,
 		CurrentUser: cu,
 		NtfyURL:     ntfyURL,
+		IsAdmin:     isAdmin,
+		IsAdminCap:  isAdminCap,
 	}
 	srv.mu.RUnlock()
 
@@ -780,6 +930,9 @@ func machineHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	srv.DebugLog("machineHandler: User %s found", reqUser.Name)
 
+	// Determine if the requesting user has admin privileges
+	isAdmin, _ := r.Context().Value("isAdmin").(bool)
+
 	// Parse form values
 	action := r.FormValue("action")
 	machineType := r.FormValue("machine")
@@ -820,20 +973,33 @@ func machineHandler(w http.ResponseWriter, r *http.Request) {
 			duration = parseDuration(durationParam)
 		}
 		log.Printf("machineHandler: Parsed duration: %v minutes", duration.Minutes())
-		if err := mch.start(reqUser, duration); err != nil {
+		// Start is always on behalf of the requesting user with normal notifications.
+		// Admin mode only suppresses notifications for override actions (clear).
+		if err := mch.start(reqUser, duration, false); err != nil {
 			log.Printf("machineHandler: Failed to start %s: %v", machineType, err)
 			http.Error(w, fmt.Sprintf("Failed to start %s", machineType), http.StatusInternalServerError)
 			return
 		}
-		srv.DebugLog("machineHandler: User %s started %s for %v", reqUser.Name, machineType, duration)
+		srv.DebugLog("machineHandler: User %s started %s for %v (admin=%v)", reqUser.Name, machineType, duration, isAdmin)
 		saveState() // Save state after starting
 	case "clear":
-		if err := mch.clear(); err != nil {
+		// Admins may clear any machine; regular users can only clear their own
+		if !isAdmin {
+			mch.mu.RLock()
+			ownsMachine := mch.User != nil && mch.User.NameLower == reqUser.NameLower
+			mch.mu.RUnlock()
+			if !ownsMachine {
+				log.Printf("machineHandler: User %s attempted to clear %s owned by another user", reqUser.Name, machineType)
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		if err := mch.clear(isAdmin); err != nil {
 			log.Printf("machineHandler: Failed to clear %s: %v", machineType, err)
 			http.Error(w, fmt.Sprintf("Failed to clear %s", machineType), http.StatusInternalServerError)
 			return
 		}
-		srv.DebugLog("machineHandler: User %s cleared %s", reqUser.Name, machineType)
+		srv.DebugLog("machineHandler: User %s cleared %s (admin=%v)", reqUser.Name, machineType, isAdmin)
 		saveState()
 	case "move":
 		duration := parseDuration(r.FormValue("duration"))
@@ -852,17 +1018,17 @@ func machineHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Dryer is already in use", http.StatusConflict)
 			return
 		}
-		if err := mch.clear(); err != nil {
+		if err := mch.clear(isAdmin); err != nil {
 			log.Printf("machineHandler: Failed to clear %s before moving: %v", machineType, err)
 			http.Error(w, fmt.Sprintf("Failed to clear %s before moving", machineType), http.StatusInternalServerError)
 			return
 		}
-		if err := srv.state.Dryer.start(reqUser, duration); err != nil {
+		if err := srv.state.Dryer.start(reqUser, duration, isAdmin); err != nil {
 			log.Printf("machineHandler: Failed to start dryer after moving from %s: %v", machineType, err)
 			http.Error(w, "Failed to start dryer after moving", http.StatusInternalServerError)
 			return
 		}
-		srv.DebugLog("machineHandler: User %s moved from %s to dryer for %v", reqUser.Name, machineType, duration)
+		srv.DebugLog("machineHandler: User %s moved from %s to dryer for %v (admin=%v)", reqUser.Name, machineType, duration, isAdmin)
 		saveState()
 	case "request":
 		if err := mch.request(reqUser); err != nil {
@@ -886,10 +1052,12 @@ func machineHandler(w http.ResponseWriter, r *http.Request) {
 		Washer      *machine
 		Dryer       *machine
 		CurrentUser *user
+		IsAdmin     bool
 	}{
 		Washer:      srv.state.Washer,
 		Dryer:       srv.state.Dryer,
 		CurrentUser: reqUser,
+		IsAdmin:     isAdmin,
 	}
 	srv.mu.RUnlock()
 
@@ -934,6 +1102,8 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User not found", http.StatusInternalServerError)
 		return
 	}
+
+	isAdmin, _ := r.Context().Value("isAdmin").(bool)
 
 	action := r.FormValue("action")
 	machineType := r.FormValue("machine")
@@ -985,14 +1155,15 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	case "cancel":
 		mch.mu.Lock()
-		if mch.Scheduled != nil && mch.Scheduled.User.NameLower == reqUser.NameLower {
+		// Admins may cancel any scheduled load; regular users can only cancel their own.
+		if mch.Scheduled != nil && (mch.Scheduled.User.NameLower == reqUser.NameLower || isAdmin) {
 			// Cancel the scheduled notification
 			if mch.scheduledCancel != nil {
 				mch.scheduledCancel()
 				mch.scheduledCancel = nil
 			}
 			mch.Scheduled = nil
-			srv.DebugLog("scheduleHandler: User %s cancelled scheduled %s", reqUser.Name, machineType)
+			srv.DebugLog("scheduleHandler: User %s cancelled scheduled %s (admin=%v)", reqUser.Name, machineType, isAdmin)
 		}
 		mch.mu.Unlock()
 		saveState()
@@ -1008,10 +1179,12 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 		Washer      *machine
 		Dryer       *machine
 		CurrentUser *user
+		IsAdmin     bool
 	}{
 		Washer:      srv.state.Washer,
 		Dryer:       srv.state.Dryer,
 		CurrentUser: reqUser,
+		IsAdmin:     isAdmin,
 	}
 	srv.mu.RUnlock()
 
@@ -1150,7 +1323,7 @@ func (mch *machine) ScheduledTimeFormatted() string {
 	return fmt.Sprintf("%s, %s", scheduled.Format("Mon"), timeLabel)
 }
 
-func (mch *machine) start(u *user, duration time.Duration) error {
+func (mch *machine) start(u *user, duration time.Duration, silent bool) error {
 	mch.mu.Lock()
 	defer mch.mu.Unlock()
 
@@ -1170,28 +1343,32 @@ func (mch *machine) start(u *user, duration time.Duration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	mch.cancelFunc = cancel
 
-	userSanitizedName := u.SanitizedName
-	machineName := mch.Name
-	dryerAvailable := srv.state.Dryer.User == nil
-	go func(ctx context.Context, delay time.Duration) {
-		select {
-		case <-time.After(delay):
-			mch.mu.RLock()
-			if err := publishMessage(userSanitizedName, machineName, "start", dryerAvailable); err != nil {
-				log.Printf("start: Failed to publish completion message: %v", err)
-			} else {
-				log.Printf("start: Successfully published completion message to topic laundromates-%s", userSanitizedName)
+	if !silent {
+		userSanitizedName := u.SanitizedName
+		machineName := mch.Name
+		dryerAvailable := srv.state.Dryer.User == nil
+		go func(ctx context.Context, delay time.Duration) {
+			select {
+			case <-time.After(delay):
+				mch.mu.RLock()
+				if err := publishMessage(userSanitizedName, machineName, "start", dryerAvailable); err != nil {
+					log.Printf("start: Failed to publish completion message: %v", err)
+				} else {
+					log.Printf("start: Successfully published completion message to topic laundromates-%s", userSanitizedName)
+				}
+				mch.mu.RUnlock()
+			case <-ctx.Done():
+				log.Printf("start: Scheduled completion message cancelled for %s", machineName)
 			}
-			mch.mu.RUnlock()
-		case <-ctx.Done():
-			log.Printf("start: Scheduled completion message cancelled for %s", machineName)
-		}
-	}(ctx, duration)
+		}(ctx, duration)
+	} else {
+		log.Printf("start: Admin started %s silently for user %s, skipping notifications", mch.Name, u.Name)
+	}
 
 	return nil
 }
 
-func (mch *machine) clear() error {
+func (mch *machine) clear(silent bool) error {
 	mch.mu.Lock()
 
 	if mch.User == nil {
@@ -1245,13 +1422,15 @@ func (mch *machine) clear() error {
 
 	srv.DebugLog("clear: Clearing machine %s for user %s", machineName, userName)
 
-	if hasWaiter {
+	if hasWaiter && !silent {
 		srv.DebugLog("clear: Notifying waiting user")
 		go func() {
 			if err := publishMessage(waiterSanitizedName, machineName, "clear", dryerAvailable); err != nil {
 				log.Printf("clear: Failed to publish clear message to waiting user: %v", err)
 			}
 		}()
+	} else if hasWaiter && silent {
+		log.Printf("clear: Admin cleared %s silently, skipping waiter notification", machineName)
 	}
 
 	srv.DebugLog("clear: Machine %s cleared", machineName)
@@ -1623,7 +1802,13 @@ func userMiddleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+		hasAdminCap := isAdminUser(r)
+		// Admin mode is only active when the user holds the cap and explicitly
+		// opts in by passing admin=true (mirroring the workstations pattern).
+		adminModeActive := hasAdminCap && (r.FormValue("admin") == "true" || r.FormValue("admin") == "1")
 		ctx := context.WithValue(r.Context(), "userName", user.NameLower)
+		ctx = context.WithValue(ctx, "isAdminCap", hasAdminCap)
+		ctx = context.WithValue(ctx, "isAdmin", adminModeActive)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

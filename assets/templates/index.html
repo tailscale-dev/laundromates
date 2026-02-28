@@ -12,6 +12,17 @@
 </head>
 <body>
     <div class="container">
+        {{if .IsAdminCap}}
+        {{if .IsAdmin}}
+        <a href="/" class="admin-badge admin-badge-active" title="Admin mode active — click to exit">
+            <span class="admin-badge-icon">⚙</span> Admin Mode
+        </a>
+        {{else}}
+        <a href="/?admin=true" class="admin-badge admin-badge-inactive" title="Click to enter admin mode">
+            <span class="admin-badge-icon">⚙</span> Admin Mode
+        </a>
+        {{end}}
+        {{end}}
         <h1>🧺 Laundromates</h1>
 
         <!-- Desktop Status table -->

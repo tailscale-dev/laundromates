@@ -970,3 +970,75 @@ input:focus {
     color: #f39c12;
     font-weight: 500;
 }
+
+/* Admin mode badge */
+.admin-badge {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Active: admin mode is on — vivid purple */
+.admin-badge-active {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    color: white;
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);
+}
+
+.admin-badge-active:hover {
+    background: linear-gradient(135deg, #6d28d9, #9333ea);
+    box-shadow: 0 3px 10px rgba(124, 58, 237, 0.5);
+}
+
+/* Inactive: admin mode available but off — muted outline style */
+.admin-badge-inactive {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1.5px solid var(--border-color);
+    box-shadow: none;
+}
+
+.admin-badge-inactive:hover {
+    background: var(--primary-bg);
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.admin-badge-icon {
+    font-size: 1rem;
+}
+
+/* Make the container relatively positioned so the badge anchors to it */
+.container {
+    position: relative;
+}
+
+/* Admin override clear button */
+.btn-admin-clear {
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.btn-admin-clear:hover {
+    background: linear-gradient(135deg, #6d28d9, #9333ea);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(124, 58, 237, 0.4);
+}
